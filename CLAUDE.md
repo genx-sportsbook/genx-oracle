@@ -45,7 +45,7 @@ python3 -m venv .venv
 ## Architecture
 
 The credential lifecycle is:
-1. **One-time setup** — `txline-subscribe` generates a guest JWT, submits a zero-cost on-chain subscription via `anchorpy`, NaCl-signs the activation message with the wallet key, and POSTs to `/api/token/activate`. The resulting `{jwt, api_token}` pair is persisted to `.txline-credentials.json`.
+1. **One-time setup** — `txline-subscribe` generates a guest JWT, submits a zero-cost on-chain `subscribe` transaction, NaCl-signs the activation message with the wallet key, and POSTs to `/api/token/activate`. The resulting `{jwt, api_token}` pair is persisted to `.txline-credentials.json`. The guest JWT is short-lived (~30 days) and is reused as the bearer token on every subsequent request — there's no refresh flow, so re-run `txline-subscribe` once it expires (this is why data can silently stop flowing after a while, with no other symptom).
 2. **Runtime** — `TxLineClient` loads credentials from that file and uses `Authorization: Bearer {jwt}` + `X-Api-Token: {api_token}` on every request.
 
 **SSE streaming** (`txline/streams/`) uses `httpx-sse`. Both streams (`/api/odds/stream`, `/api/scores/stream`) support optional `fixtureId` filtering and reconnect via `Last-Event-ID`. Streams yield typed Pydantic models (`OddsUpdate | Heartbeat`, `ScoreUpdate | Heartbeat`).
@@ -54,7 +54,7 @@ The credential lifecycle is:
 
 **`txline-server`** (`txline/api/server.py`) is a FastAPI app that proxies the three TxLINE endpoints (`GET /fixtures`, `GET /odds/stream`, `GET /scores/stream`) and serves a vanilla JS browser dashboard at `/`. Static files live in `txline/api/static/` (`index.html`, `app.js`, `style.css`). The browser dashboard mirrors `txline-watch`: it fetches `/fixtures` on load for name resolution, then opens two `EventSource` connections and updates a live table with flash highlighting on each update. SSE events use named types (`event: odds`, `event: scores`, `event: heartbeat`). CORS is open (`allow_origins=["*"]`).
 
-**The Anchor IDL** (`txline/idl/txline.json`) is fetched from the chain on first run via `anchorpy._fetch_idl` and cached locally. The directory is gitignored. If on-chain fetch fails, place the IDL file there manually.
+**The on-chain `subscribe` transaction** (`txline/subscription.py`) is hand-built with `solders` rather than through `anchorpy`'s `Program`/`Idl` — the deployed program (`txodds/tx-oracle`) publishes a modern-format Anchor IDL that `anchorpy` (0.21.0, latest on PyPI) cannot parse, and the program has no on-chain IDL account at all, so there is nothing to fetch at runtime regardless. The account list and PDA seeds (`pricing_matrix`, `token_treasury_v2`) are read straight from `programs/txoracle/src/instructions/subscriptions/subscribe.rs` in that repo. TxL is a Token-2022 mint, so ATAs must be derived with `TOKEN_2022_PROGRAM_ID`, not the legacy Token program.
 
 ## Key constants (txline/subscription.py)
 

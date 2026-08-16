@@ -6,11 +6,10 @@ a subscription, then exchanges the resulting tx signature + wallet proof
 for a long-lived API token.
 
 Program:  9ExbZjAapQww1vfcisDmrngPinHTEfpjYRWMunJgcKaA
-TxL mint: sLX1i9dfmsuyFBmJTWuGjjRmG4VPWYK6dRRKSM4BCSx
+TxL mint: Zhw9TVKp68a1QrftncMSd6ELXKDtpVMNuMGr1jNwdeL
 """
 
-import asyncio
-import json
+import hashlib
 import logging
 from pathlib import Path
 
@@ -30,7 +29,7 @@ from txline.models import TokenCredentials
 logger = logging.getLogger(__name__)
 
 PROGRAM_ID = Pubkey.from_string("9ExbZjAapQww1vfcisDmrngPinHTEfpjYRWMunJgcKaA")
-TXL_MINT = Pubkey.from_string("sLX1i9dfmsuyFBmJTWuGjjRmG4VPWYK6dRRKSM4BCSx")
+TXL_MINT = Pubkey.from_string("Zhw9TVKp68a1QrftncMSd6ELXKDtpVMNuMGr1jNwdeL")
 SOLANA_RPC = "https://api.mainnet-beta.solana.com"
 
 # Free-tier service levels:  1 = 60-second delay,  12 = real-time
@@ -58,7 +57,9 @@ async def subscribe_free_tier(
     4. Exchange for a long-lived API token.
     5. Persist credentials to disk.
     """
-    async with httpx.AsyncClient() as http_client:
+    # The server independently re-validates the on-chain tx before activating,
+    # which can take longer than httpx's default 5s timeout.
+    async with httpx.AsyncClient(timeout=60.0) as http_client:
         logger.info("Fetching guest JWT…")
         jwt = await get_guest_jwt(http_client)
 
@@ -83,34 +84,19 @@ async def subscribe_free_tier(
     return creds
 
 
-async def _fetch_idl(program_id: Pubkey, rpc_url: str) -> dict:
-    """
-    Fetch the Anchor IDL stored on-chain at the canonical IDL account
-    (PDA seeded with b'anchor:idl' + program_id bytes).
-    Falls back to a local cache at txline/idl/txline.json if available.
-    """
-    cache = Path(__file__).parent / "idl" / "txline.json"
-    if cache.exists():
-        logger.debug("Loading IDL from local cache %s", cache)
-        return json.loads(cache.read_text())
+# anchorpy's Idl parser (as of 0.21.0, the latest release) cannot parse the
+# modern Anchor IDL format this program publishes ("data did not match any
+# variant of untagged enum IdlAccountItem"), so the subscribe instruction is
+# hand-built here instead of going through anchorpy's Program/Idl machinery.
+# The account list and PDA seeds below come from the deployed program source
+# (programs/txoracle/src/instructions/subscriptions/subscribe.rs).
 
-    from anchorpy.idl import _fetch_idl as anchorpy_fetch_idl
-    from solana.rpc.async_api import AsyncClient
+SYSTEM_PROGRAM_ID = Pubkey.from_string("11111111111111111111111111111111")
+TOKEN_2022_PROGRAM_ID = Pubkey.from_string("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")
+ASSOCIATED_TOKEN_PROGRAM_ID = Pubkey.from_string("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL")
 
-    async with AsyncClient(rpc_url) as conn:
-        idl = await anchorpy_fetch_idl(program_id, conn)
-
-    if idl is None:
-        raise RuntimeError(
-            "Could not fetch IDL from chain and no local cache found at txline/idl/txline.json. "
-            "Download the IDL from the TxLINE docs and place it there."
-        )
-
-    # Cache for future runs
-    cache.parent.mkdir(exist_ok=True)
-    cache.write_text(json.dumps(idl, indent=2))
-    logger.info("IDL cached at %s", cache)
-    return idl
+# Anchor instruction discriminator: first 8 bytes of sha256("global:subscribe")
+_SUBSCRIBE_DISCRIMINATOR = hashlib.sha256(b"global:subscribe").digest()[:8]
 
 
 async def _submit_subscription(
@@ -120,46 +106,52 @@ async def _submit_subscription(
     rpc_url: str,
 ) -> str:
     """Build and send the subscribe transaction; return the confirmed tx signature."""
-    from anchorpy import Program, Provider, Wallet, Context, Idl
-    from anchorpy.provider import DEFAULT_OPTIONS
     from solana.rpc.async_api import AsyncClient
+    from solana.rpc.commitment import Confirmed
+    from solders.instruction import AccountMeta, Instruction
+    from solders.transaction import Transaction
 
-    idl_raw = await _fetch_idl(PROGRAM_ID, rpc_url)
-    idl = Idl.from_json(json.dumps(idl_raw))
+    user = keypair.pubkey()
+    user_ata = _derive_ata(user, TXL_MINT)
 
-    connection = AsyncClient(rpc_url)
-    provider = Provider(connection, Wallet(keypair), DEFAULT_OPTIONS)
-    program = Program(idl, PROGRAM_ID, provider)
+    pricing_matrix, _ = Pubkey.find_program_address([b"pricing_matrix"], PROGRAM_ID)
+    treasury_pda, _ = Pubkey.find_program_address([b"token_treasury_v2"], PROGRAM_ID)
+    treasury_vault = _derive_ata(treasury_pda, TXL_MINT)
 
-    # Derive the subscriber's associated token account for TxL
-    # (required by the program even though the free tier transfers 0 tokens)
-    try:
-        from spl.token.instructions import get_associated_token_address
-        subscriber_ata = get_associated_token_address(keypair.pubkey(), TXL_MINT)
-    except ImportError:
-        # spl-token may not be installed; derive PDA manually
-        subscriber_ata = _derive_ata(keypair.pubkey(), TXL_MINT)
-
-    tx_sig = await program.rpc["subscribe"](
-        service_level,
-        duration_weeks,
-        ctx=Context(
-            accounts={
-                "subscriber": keypair.pubkey(),
-                "subscriberTokenAccount": subscriber_ata,
-                "tokenMint": TXL_MINT,
-            }
-        ),
+    data = (
+        _SUBSCRIBE_DISCRIMINATOR
+        + service_level.to_bytes(2, "little")
+        + duration_weeks.to_bytes(1, "little")
     )
+    accounts = [
+        AccountMeta(pubkey=user, is_signer=True, is_writable=True),
+        AccountMeta(pubkey=pricing_matrix, is_signer=False, is_writable=False),
+        AccountMeta(pubkey=TXL_MINT, is_signer=False, is_writable=False),
+        AccountMeta(pubkey=user_ata, is_signer=False, is_writable=True),
+        AccountMeta(pubkey=treasury_vault, is_signer=False, is_writable=True),
+        AccountMeta(pubkey=treasury_pda, is_signer=False, is_writable=False),
+        AccountMeta(pubkey=TOKEN_2022_PROGRAM_ID, is_signer=False, is_writable=False),
+        AccountMeta(pubkey=SYSTEM_PROGRAM_ID, is_signer=False, is_writable=False),
+        AccountMeta(pubkey=ASSOCIATED_TOKEN_PROGRAM_ID, is_signer=False, is_writable=False),
+    ]
+    instruction = Instruction(PROGRAM_ID, data, accounts)
 
-    await connection.close()
+    async with AsyncClient(rpc_url) as connection:
+        blockhash_resp = await connection.get_latest_blockhash()
+        tx = Transaction.new_signed_with_payer(
+            [instruction],
+            user,
+            [keypair],
+            blockhash_resp.value.blockhash,
+        )
+        send_resp = await connection.send_transaction(tx)
+        tx_sig = send_resp.value
+        await connection.confirm_transaction(tx_sig, commitment=Confirmed)
+
     return str(tx_sig)
 
 
 def _derive_ata(owner: Pubkey, mint: Pubkey) -> Pubkey:
-    """Derive Associated Token Account PDA without the spl library."""
-    from solders.pubkey import Pubkey as Pk
-    TOKEN_PROGRAM_ID = Pk.from_string("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
-    ATA_PROGRAM_ID = Pk.from_string("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1bRS")
-    seeds = [bytes(owner), bytes(TOKEN_PROGRAM_ID), bytes(mint)]
-    return Pk.find_program_address(seeds, ATA_PROGRAM_ID)[0]
+    """Derive the Token-2022 Associated Token Account PDA for (owner, mint)."""
+    seeds = [bytes(owner), bytes(TOKEN_2022_PROGRAM_ID), bytes(mint)]
+    return Pubkey.find_program_address(seeds, ASSOCIATED_TOKEN_PROGRAM_ID)[0]
