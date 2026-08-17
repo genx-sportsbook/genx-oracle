@@ -31,11 +31,12 @@ async def get_guest_jwt(client: httpx.AsyncClient) -> str:
 
 def build_activation_message(tx_sig: str, leagues: list[int], jwt: str) -> bytes:
     """
-    Server expects the exact string  "{txSig}:{leagues_json}:{jwt}"
+    Server expects the exact string  "{txSig}:{leagues.join(',')}:{jwt}"
     signed with the wallet's Ed25519 key using NaCl detached signature.
+    An empty leagues list joins to an empty string, e.g. "{txSig}::{jwt}".
     """
-    leagues_json = json.dumps(leagues, separators=(",", ":"))
-    msg = f"{tx_sig}:{leagues_json}:{jwt}"
+    leagues_str = ",".join(str(league) for league in leagues)
+    msg = f"{tx_sig}:{leagues_str}:{jwt}"
     return msg.encode()
 
 
@@ -66,7 +67,8 @@ async def activate_token(
         },
     )
     resp.raise_for_status()
-    return resp.json()["token"]
+    # The server returns the API token as a bare text/plain body, not JSON.
+    return resp.text.strip()
 
 
 def load_credentials(path: Path) -> TokenCredentials | None:
