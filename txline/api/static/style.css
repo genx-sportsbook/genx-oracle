@@ -1,19 +1,78 @@
+:root {
+  --bg: #0a0e14;
+  --panel-bg: #10151f;
+  --border: #232b3a;
+  --text: #e4ecf7;
+  --text-muted: #86a0c4;
+  --market-color: #7dd3fc;
+  --accent-cyan: #38bdf8;
+  --accent-violet: #a5a6f6;
+  --accent-teal: #2dd4bf;
+  --tick-up: #34d399;
+  --tick-down: #fb7185;
+  --row-flash: #142334;
+}
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
-  background: #0d1117;
-  color: #e6edf3;
+  background: var(--bg);
+  color: var(--text);
   font-family: 'Courier New', Courier, monospace;
-  font-size: 13px;
-  padding: 16px;
+  font-size: 17px;
 }
 
-h1 {
-  color: #58a6ff;
-  font-size: 18px;
-  margin-bottom: 16px;
+/* --- Top bar --- */
+
+#topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.title {
+  color: var(--accent-cyan);
+  font-size: 20px;
+  font-weight: bold;
+  letter-spacing: 0.08em;
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  color: var(--text-muted);
+  font-size: 14px;
   letter-spacing: 0.05em;
 }
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.dot.live {
+  background: var(--accent-cyan);
+  box-shadow: 0 0 6px var(--accent-cyan);
+}
+
+.dot.reconnecting {
+  background: var(--tick-down);
+  box-shadow: 0 0 6px var(--tick-down);
+}
+
+/* --- Table --- */
 
 table {
   width: 100%;
@@ -21,41 +80,251 @@ table {
 }
 
 th, td {
-  padding: 6px 10px;
+  padding: 10px 14px;
   text-align: left;
-  border: 1px solid #30363d;
+  border: 1px solid var(--border);
   white-space: nowrap;
 }
 
 thead th {
-  background: #161b22;
-  color: #8b949e;
+  background: var(--panel-bg);
+  color: var(--text-muted);
   font-weight: normal;
   text-transform: uppercase;
-  font-size: 11px;
+  font-size: 13px;
   letter-spacing: 0.08em;
 }
 
 tbody tr {
-  background: #0d1117;
-  transition: background 0.8s ease;
+  background: var(--bg);
 }
 
 tbody tr:nth-child(even) {
-  background: #111820;
+  background: #0d131b;
 }
 
 tbody tr.flash {
-  background: #1c2d3a;
-  transition: background 0s;
+  background: var(--row-flash);
 }
 
-td.fix-name { font-weight: bold; }
-td.score    { color: #3fb950; font-weight: bold; }
-td.state    { color: #d29922; }
-td.prices   { color: #ffffff; }
-td.pct      { color: #58a6ff; }
-td.comp,
-td.kickoff,
-td.updated  { color: #8b949e; }
-td.market   { color: #8b949e; }
+td.fix-name {
+  vertical-align: top;
+}
+
+.fix-title {
+  font-weight: bold;
+  font-size: 18px;
+  color: var(--accent-violet);
+}
+
+.fix-sub {
+  margin-top: 2px;
+  font-size: 14px;
+  font-weight: normal;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.fix-updated {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--text-muted);
+  opacity: 0.75;
+}
+
+/* Only fixtures with more than one market are actually expandable —
+   others get no pointer/hint since toggling would be a no-op. */
+td.fix-name.expandable {
+  cursor: pointer;
+}
+
+.fix-expand {
+  margin-top: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-cyan);
+  letter-spacing: 0.02em;
+}
+
+td.fix-name.expandable:hover .fix-expand {
+  color: var(--accent-teal);
+}
+
+/* --- Multi-line fixture groups --- */
+
+/* Lines after the first within a fixture group share the fixture cell via
+   rowspan, so give them a lighter separator instead of the row's normal
+   border to read as "still this fixture" rather than a new one. */
+tbody tr:not(.group-start) td {
+  border-top-style: dashed;
+  border-top-color: rgba(134, 160, 196, 0.18);
+}
+
+/* --- Market chip --- */
+
+td.market {
+  white-space: nowrap;
+}
+
+.chip-market {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 5px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--market-color);
+  border: 1px solid rgba(125, 211, 252, 0.45);
+  background: rgba(125, 211, 252, 0.1);
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+/* Clickable only in the main table — opens this line's history panel. */
+.chip-market-click {
+  cursor: pointer;
+}
+
+.chip-market-click:hover {
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.4);
+}
+
+/* --- Price chips --- */
+
+td.prices {
+  white-space: nowrap;
+}
+
+.chip {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 76px;
+  padding: 4px 12px;
+  margin-right: 8px;
+  border-radius: 5px;
+  border: 1px solid var(--chip-border, var(--border));
+  background: var(--chip-bg, transparent);
+  color: var(--chip-color, var(--text));
+  transition: box-shadow 0.15s ease;
+}
+
+.chip-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: inherit;
+  opacity: 0.8;
+}
+
+.chip-value {
+  font-size: 17px;
+  font-weight: bold;
+  color: inherit;
+}
+
+.chip-0 { --chip-color: var(--accent-cyan);   --chip-border: rgba(56, 189, 248, 0.5);  --chip-bg: rgba(56, 189, 248, 0.12); }
+.chip-1 { --chip-color: var(--accent-violet); --chip-border: rgba(165, 166, 246, 0.5); --chip-bg: rgba(165, 166, 246, 0.12); }
+.chip-2 { --chip-color: var(--accent-teal);   --chip-border: rgba(45, 212, 191, 0.5);  --chip-bg: rgba(45, 212, 191, 0.12); }
+
+.chip.chip-up {
+  --chip-color: var(--tick-up);
+  --chip-border: var(--tick-up);
+  --chip-bg: rgba(52, 211, 153, 0.16);
+  box-shadow: 0 0 10px rgba(52, 211, 153, 0.55);
+}
+
+.chip.chip-down {
+  --chip-color: var(--tick-down);
+  --chip-border: var(--tick-down);
+  --chip-bg: rgba(251, 113, 133, 0.16);
+  box-shadow: 0 0 10px rgba(251, 113, 133, 0.55);
+}
+
+/* --- History panel --- */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 6, 10, 0.5);
+  display: none;
+  z-index: 10;
+}
+
+.backdrop.open { display: block; }
+
+.history-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  width: 420px;
+  max-width: 90vw;
+  background: var(--panel-bg);
+  border-left: 1px solid var(--border);
+  transform: translateX(100%);
+  transition: transform 0.25s ease;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+}
+
+.history-panel.open { transform: translateX(0); }
+
+.history-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.history-title-fixture {
+  color: var(--accent-cyan);
+  font-weight: bold;
+  font-size: 16px;
+}
+
+.history-title-market {
+  margin-top: 6px;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  margin-top: 2px;
+}
+
+.close-btn:hover { color: var(--text); }
+
+.history-list {
+  overflow-y: auto;
+  flex: 1;
+  padding: 4px 18px;
+}
+
+.history-entry {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+
+.history-entry .h-time {
+  color: var(--text-muted);
+  margin-right: 10px;
+}
+
+.history-entry .h-prices {
+  margin-top: 6px;
+}
+
+.history-empty {
+  color: var(--text-muted);
+  padding: 16px 0;
+}

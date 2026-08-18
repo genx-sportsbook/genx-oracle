@@ -7,23 +7,39 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <h1>TxLINE Live</h1>
+  <div id="topbar">
+    <span class="title">TxLINE Live</span>
+    <div class="topbar-right">
+      <span id="fixtureCount" class="stat">0 fixtures</span>
+      <span id="lastUpdate" class="stat">Updated —</span>
+      <span id="clock" class="stat">00:00:00</span>
+      <span class="status">
+        <span id="statusDot" class="dot"></span>
+        <span id="statusText">connecting</span>
+      </span>
+    </div>
+  </div>
+
   <table id="dashboard">
     <thead>
       <tr>
         <th>Fixture</th>
-        <th>Competition</th>
-        <th>Kickoff</th>
-        <th>Score</th>
-        <th>State</th>
         <th>Market</th>
         <th>Prices</th>
-        <th>Pct</th>
-        <th>Updated</th>
       </tr>
     </thead>
     <tbody id="rows"></tbody>
   </table>
+
+  <div id="backdrop" class="backdrop"></div>
+  <aside id="historyPanel" class="history-panel">
+    <div class="history-header">
+      <span id="historyTitle"></span>
+      <button id="historyClose" class="close-btn" aria-label="Close">&times;</button>
+    </div>
+    <div id="historyList" class="history-list"></div>
+  </aside>
+
   <script src="app.js"></script>
 </body>
 </html>
