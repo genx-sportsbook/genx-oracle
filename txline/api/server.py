@@ -32,6 +32,17 @@ def create_app(creds: TokenCredentials) -> FastAPI:
         allow_headers=["*"],
     )
 
+    @app.middleware("http")
+    async def no_cache(request, call_next):
+        # StaticFiles only sends Last-Modified/ETag, no Cache-Control — browsers
+        # then apply their own heuristic freshness, which can serve a stale
+        # cached copy of app.js/style.css after an edit until a hard refresh.
+        # This is actively edited static UI, not a versioned release asset, so
+        # force revalidation every time instead of relying on browser defaults.
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
     @app.get("/fixtures")
     async def fixtures_endpoint():
         async with httpx.AsyncClient() as http:

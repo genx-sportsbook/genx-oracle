@@ -52,15 +52,24 @@ body {
   letter-spacing: 0.05em;
 }
 
-.select-filter {
-  appearance: none;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  background: var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2386a0c4' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 12px center;
+/* Custom dropdown — a native <select>'s open list can't be themed in
+   Chrome/Safari on macOS (they hand it off entirely to the OS to render;
+   only Firefox lets CSS reach it), so this is a hand-built listbox instead,
+   themed identically in every browser. */
+
+.dropdown {
+  position: relative;
+}
+
+.dropdown-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 4px;
-  padding: 7px 30px 7px 12px;
+  padding: 7px 12px;
   font-family: inherit;
   font-size: 14px;
   font-weight: 500;
@@ -69,16 +78,63 @@ body {
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.select-filter:hover,
-.select-filter:focus {
+.dropdown-trigger:hover,
+.dropdown-trigger:focus-visible,
+.dropdown[data-open="true"] .dropdown-trigger {
   border-color: var(--accent-cyan);
   box-shadow: 0 0 8px rgba(56, 189, 248, 0.35);
   outline: none;
 }
 
-.select-filter option {
+.dropdown-chevron {
+  width: 10px;
+  height: 6px;
+  flex: none;
+  background: currentColor;
+  opacity: 0.65;
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  transition: transform 0.15s ease;
+}
+
+.dropdown[data-open="true"] .dropdown-chevron {
+  transform: rotate(180deg);
+}
+
+.dropdown-list {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 100%;
+  max-height: 320px;
+  overflow-y: auto;
+  list-style: none;
   background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+  z-index: 30;
+}
+
+.dropdown-list[hidden] {
+  display: none;
+}
+
+.dropdown-option {
+  padding: 8px 14px;
+  font-size: 14px;
+  font-weight: 500;
   color: var(--text);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.dropdown-option:hover,
+.dropdown-option.highlighted {
+  background: rgba(56, 189, 248, 0.15);
+}
+
+.dropdown-option.selected {
+  color: var(--accent-cyan);
 }
 
 .status {

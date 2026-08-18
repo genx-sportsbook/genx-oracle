@@ -13,9 +13,18 @@
   <div id="topbar">
     <span class="title">TxLINE Live</span>
     <div class="topbar-right">
-      <select id="competitionFilter" class="select-filter">
-        <option value="">All Competitions</option>
-      </select>
+      <div class="dropdown" id="competitionDropdown">
+        <button type="button" class="dropdown-trigger" id="competitionTrigger"
+                aria-haspopup="listbox" aria-expanded="false" aria-controls="competitionList">
+          <span id="competitionTriggerLabel">All Competitions</span>
+          <span class="dropdown-chevron" aria-hidden="true"></span>
+        </button>
+        <ul class="dropdown-list" id="competitionList" role="listbox"
+            aria-label="Filter by competition" tabindex="-1" hidden>
+          <li class="dropdown-option selected" role="option" aria-selected="true"
+              data-value="" id="compopt-all">All Competitions</li>
+        </ul>
+      </div>
       <span id="fixtureCount" class="stat">0 fixtures</span>
       <span id="lastUpdate" class="stat">Updated —</span>
       <span id="clock" class="stat">00:00:00</span>

@@ -125,9 +125,13 @@ let lastFlashKey = null
 let flashTimer = null
 let openLineKey = null
 let selectedCompetition = ''  // '' = no filter, show every competition
+let highlightedIndex = -1     // index into dropdownOptions(), for keyboard nav
 
 const tbody = document.getElementById('rows')
-const competitionFilterEl = document.getElementById('competitionFilter')
+const competitionDropdown = document.getElementById('competitionDropdown')
+const competitionTrigger = document.getElementById('competitionTrigger')
+const competitionTriggerLabel = document.getElementById('competitionTriggerLabel')
+const competitionList = document.getElementById('competitionList')
 const fixtureCountEl = document.getElementById('fixtureCount')
 const lastUpdateEl = document.getElementById('lastUpdate')
 const clockEl = document.getElementById('clock')
@@ -315,13 +319,73 @@ function setStatus(s) {
   statusTextEl.textContent = s
 }
 
+// --- Competition dropdown (custom listbox — see style.css comment for why
+// this isn't a native <select>: Chrome/Safari on macOS hand the open list
+// off to the OS to render, so CSS can't theme it there; only Firefox does.
+// This hand-built version themes identically in every browser.) ---
+
 function populateCompetitionFilter(competitionNames) {
-  for (const name of [...competitionNames].sort()) {
-    const opt = document.createElement('option')
-    opt.value = name
-    opt.textContent = name
-    competitionFilterEl.appendChild(opt)
+  ;[...competitionNames].sort().forEach((name, i) => {
+    const li = document.createElement('li')
+    li.className = 'dropdown-option'
+    li.setAttribute('role', 'option')
+    li.setAttribute('aria-selected', 'false')
+    li.dataset.value = name
+    li.id = `compopt-${i}`
+    li.textContent = name
+    competitionList.appendChild(li)
+  })
+}
+
+function dropdownOptions() {
+  return [...competitionList.querySelectorAll('.dropdown-option')]
+}
+
+function setHighlighted(idx) {
+  const opts = dropdownOptions()
+  opts.forEach(o => o.classList.remove('highlighted'))
+  if (idx < 0 || idx >= opts.length) {
+    highlightedIndex = -1
+    return
   }
+  highlightedIndex = idx
+  const opt = opts[idx]
+  opt.classList.add('highlighted')
+  competitionTrigger.setAttribute('aria-activedescendant', opt.id)
+  opt.scrollIntoView({ block: 'nearest' })
+}
+
+function openDropdown() {
+  competitionDropdown.dataset.open = 'true'
+  competitionList.hidden = false
+  competitionTrigger.setAttribute('aria-expanded', 'true')
+  const opts = dropdownOptions()
+  const currentIdx = opts.findIndex(o => o.dataset.value === selectedCompetition)
+  setHighlighted(currentIdx >= 0 ? currentIdx : 0)
+}
+
+function closeDropdown() {
+  competitionDropdown.dataset.open = 'false'
+  competitionList.hidden = true
+  competitionTrigger.setAttribute('aria-expanded', 'false')
+  competitionTrigger.removeAttribute('aria-activedescendant')
+  highlightedIndex = -1
+}
+
+function toggleDropdown() {
+  if (competitionList.hidden) openDropdown()
+  else closeDropdown()
+}
+
+function selectCompetition(value, label) {
+  selectedCompetition = value
+  competitionTriggerLabel.textContent = label
+  dropdownOptions().forEach(o => {
+    const isSelected = o.dataset.value === value
+    o.classList.toggle('selected', isSelected)
+    o.setAttribute('aria-selected', String(isSelected))
+  })
+  render()
 }
 
 // --- Startup ---
@@ -381,9 +445,45 @@ async function init() {
   tickClock()
   setInterval(tickClock, 1000)
 
-  competitionFilterEl.addEventListener('change', () => {
-    selectedCompetition = competitionFilterEl.value
-    render()
+  competitionTrigger.addEventListener('click', () => toggleDropdown())
+
+  competitionList.addEventListener('click', (e) => {
+    const opt = e.target.closest('.dropdown-option')
+    if (!opt) return
+    selectCompetition(opt.dataset.value, opt.textContent)
+    closeDropdown()
+  })
+
+  // Keep keyboard highlight in sync with the mouse so hovering doesn't leave
+  // two different rows looking highlighted at once (the hovered one via CSS
+  // :hover, and a stale keyboard-set one via the .highlighted class).
+  competitionList.addEventListener('mouseover', (e) => {
+    const opt = e.target.closest('.dropdown-option')
+    if (!opt) return
+    const idx = dropdownOptions().indexOf(opt)
+    if (idx >= 0) setHighlighted(idx)
+  })
+
+  competitionTrigger.addEventListener('keydown', (e) => {
+    const opts = dropdownOptions()
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      if (competitionList.hidden) { openDropdown(); return }
+      const delta = e.key === 'ArrowDown' ? 1 : -1
+      setHighlighted(Math.max(0, Math.min(opts.length - 1, highlightedIndex + delta)))
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      if (competitionList.hidden) { openDropdown(); return }
+      const opt = opts[highlightedIndex]
+      if (opt) selectCompetition(opt.dataset.value, opt.textContent)
+      closeDropdown()
+    } else if (e.key === 'Escape') {
+      closeDropdown()
+    }
+  })
+
+  document.addEventListener('click', (e) => {
+    if (!competitionDropdown.contains(e.target)) closeDropdown()
   })
 
   historyClose.addEventListener('click', closePanel)
