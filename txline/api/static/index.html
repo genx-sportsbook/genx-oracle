@@ -4,12 +4,18 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TxLINE Live</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div id="topbar">
     <span class="title">TxLINE Live</span>
     <div class="topbar-right">
+      <select id="competitionFilter" class="select-filter">
+        <option value="">All Competitions</option>
+      </select>
       <span id="fixtureCount" class="stat">0 fixtures</span>
       <span id="lastUpdate" class="stat">Updated —</span>
       <span id="clock" class="stat">00:00:00</span>

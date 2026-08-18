@@ -124,8 +124,10 @@ let lineOrderCounter = 0
 let lastFlashKey = null
 let flashTimer = null
 let openLineKey = null
+let selectedCompetition = ''  // '' = no filter, show every competition
 
 const tbody = document.getElementById('rows')
+const competitionFilterEl = document.getElementById('competitionFilter')
 const fixtureCountEl = document.getElementById('fixtureCount')
 const lastUpdateEl = document.getElementById('lastUpdate')
 const clockEl = document.getElementById('clock')
@@ -263,6 +265,10 @@ function flash(key) {
 function render() {
   const groups = new Map()  // fixtureId -> array of line rows
   for (const line of lines.values()) {
+    if (selectedCompetition) {
+      const fx = fixtures.get(line.fixtureId)
+      if (!fx || fx.competition !== selectedCompetition) continue
+    }
     if (!groups.has(line.fixtureId)) groups.set(line.fixtureId, [])
     groups.get(line.fixtureId).push(line)
   }
@@ -309,6 +315,15 @@ function setStatus(s) {
   statusTextEl.textContent = s
 }
 
+function populateCompetitionFilter(competitionNames) {
+  for (const name of [...competitionNames].sort()) {
+    const opt = document.createElement('option')
+    opt.value = name
+    opt.textContent = name
+    competitionFilterEl.appendChild(opt)
+  }
+}
+
 // --- Startup ---
 
 async function init() {
@@ -317,9 +332,12 @@ async function init() {
     const res = await fetch('/fixtures')
     if (res.ok) {
       const fixtures = await res.json()
+      const competitions = new Set()
       for (const f of fixtures) {
         fixturesCache.set(f.FixtureId, f)
+        if (f.Competition) competitions.add(f.Competition)
       }
+      populateCompetitionFilter(competitions)
     }
   } catch (err) {
     console.warn('Fixture fetch failed, running with raw IDs:', err)
@@ -362,6 +380,11 @@ async function init() {
 
   tickClock()
   setInterval(tickClock, 1000)
+
+  competitionFilterEl.addEventListener('change', () => {
+    selectedCompetition = competitionFilterEl.value
+    render()
+  })
 
   historyClose.addEventListener('click', closePanel)
   backdrop.addEventListener('click', closePanel)
