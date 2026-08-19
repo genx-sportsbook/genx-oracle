@@ -154,6 +154,7 @@ let openLineKey = null
 let selectedCompetition = ''  // '' = no filter, show every competition
 let highlightedIndex = -1     // index into dropdownOptions(), for keyboard nav
 let totalUpdateCount = 0      // odds updates received across every fixture/market, for the whole session
+const competitionUpdateCounts = new Map()  // competition name -> odds updates received for that competition
 
 const tbody = document.getElementById('rows')
 const competitionDropdown = document.getElementById('competitionDropdown')
@@ -417,6 +418,16 @@ function toggleDropdown() {
   else closeDropdown()
 }
 
+// Shows the count for the selected competition, or the session total when
+// "All Competitions" is selected. Called on every odds update and whenever
+// the dropdown selection changes, so it always reflects the current filter.
+function updateTotalUpdatesDisplay() {
+  const count = selectedCompetition
+    ? (competitionUpdateCounts.get(selectedCompetition) || 0)
+    : totalUpdateCount
+  totalUpdatesEl.textContent = `${count} update${count === 1 ? '' : 's'}`
+}
+
 function selectCompetition(value, label) {
   selectedCompetition = value
   competitionTriggerLabel.textContent = label
@@ -425,6 +436,7 @@ function selectCompetition(value, label) {
     o.classList.toggle('selected', isSelected)
     o.setAttribute('aria-selected', String(isSelected))
   })
+  updateTotalUpdatesDisplay()
   render()
 }
 
@@ -473,8 +485,11 @@ async function init() {
       fx.updated = line.updated  // fixture-level "last updated across any of its lines"
       fx.updateCount++  // total odds updates received for this fixture, across all its markets
       totalUpdateCount++  // total odds updates received across every fixture/market
+      if (fx.competition && fx.competition !== '—') {
+        competitionUpdateCounts.set(fx.competition, (competitionUpdateCounts.get(fx.competition) || 0) + 1)
+      }
       lastUpdateEl.textContent = `Updated ${fx.updated}`  // global "last update across the whole feed"
-      totalUpdatesEl.textContent = `${totalUpdateCount} update${totalUpdateCount === 1 ? '' : 's'}`
+      updateTotalUpdatesDisplay()
 
       pushHistory(line.key, d)
       flash(line.key)
