@@ -8,6 +8,7 @@
   --accent-cyan: #38bdf8;
   --accent-violet: #a5a6f6;
   --accent-teal: #2dd4bf;
+  --accent-amber: #fbbf24;
   --tick-up: #34d399;
   --tick-down: #fb7185;
   --row-flash: #142334;
@@ -255,17 +256,43 @@ td.market {
   white-space: nowrap;
 }
 
-.chip-market {
+/* A market renders as a row of separate boxes — one per facet (type / line /
+   period) — each in its own color, rather than one run-on label. */
+.chip-market-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chip-market-part {
   display: inline-block;
   padding: 4px 10px;
   border-radius: 5px;
   font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.02em;
-  color: var(--market-color);
-  border: 1px solid rgba(125, 211, 252, 0.45);
-  background: rgba(125, 211, 252, 0.1);
+  color: var(--part-color, var(--text));
+  border: 1px solid var(--part-border, var(--border));
+  background: var(--part-bg, transparent);
   transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.chip-market-type {
+  --part-color: var(--market-color);
+  --part-border: rgba(125, 211, 252, 0.45);
+  --part-bg: rgba(125, 211, 252, 0.1);
+}
+
+.chip-market-param {
+  --part-color: var(--accent-violet);
+  --part-border: rgba(165, 166, 246, 0.45);
+  --part-bg: rgba(165, 166, 246, 0.1);
+}
+
+.chip-market-period {
+  --part-color: var(--accent-amber);
+  --part-border: rgba(251, 191, 36, 0.45);
+  --part-bg: rgba(251, 191, 36, 0.1);
 }
 
 /* Clickable only in the main table — opens this line's history panel. */
@@ -273,7 +300,7 @@ td.market {
   cursor: pointer;
 }
 
-.chip-market-click:hover {
+.chip-market-click:hover .chip-market-part {
   border-color: var(--accent-cyan);
   box-shadow: 0 0 8px rgba(56, 189, 248, 0.4);
 }

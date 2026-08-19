@@ -38,18 +38,23 @@ const PARAM_KEY_NAMES = {
 }
 
 function prettifyMarketParams(raw) {
-  if (!raw) return ''
+  if (!raw) return []
   return raw.split(',').map(part => {
     const [key, value] = part.split('=')
     if (value === undefined) return part
     const label = PARAM_KEY_NAMES[key] || (key.charAt(0).toUpperCase() + key.slice(1))
     return `${label} ${value}`
-  }).join(', ')
+  })
 }
 
-// MarketPeriod is also a "key=value" string. Only "half=1" has been observed
-// live; "half=2" is hardcoded on the same convention (1st/2nd half) since it
-// hasn't appeared on the wire yet during a period where a 2nd half was live.
+// MarketPeriod is also a "key=value" string. Only "half=1" has ever been
+// observed live, and TxLINE's docs/OpenAPI spec don't cover MarketPeriod at
+// all (confirmed 2026-08-19 — no enum, no example, not mentioned on any
+// documentation page including the odds-coverage/overview pages, which
+// explicitly say to read markets off the wire rather than assume a fixed
+// catalog). So "1st Half" is our best-effort reading of the "half=1"
+// convention, not a vendor-confirmed fact — "half=2" is hardcoded on the
+// same assumption since it hasn't appeared on the wire yet.
 const HALF_NAMES = { 1: '1st Half', 2: '2nd Half' }
 
 function prettifyMarketPeriod(raw) {
@@ -60,22 +65,44 @@ function prettifyMarketPeriod(raw) {
   return raw
 }
 
+// Structured form used by the boxed chip display: one box per component
+// (type / line / period) instead of a single flattened string.
+function marketParts(d) {
+  return {
+    type: prettifyMarketType(d.SuperOddsType),
+    params: prettifyMarketParams(d.MarketParameters),
+    period: prettifyMarketPeriod(d.MarketPeriod),
+  }
+}
+
+// Flat text form, kept for contexts that want a single plain string (e.g.
+// window title, alt text) rather than the boxed chip markup.
 function marketLabel(d) {
-  const parts = [prettifyMarketType(d.SuperOddsType)]
-  const params = prettifyMarketParams(d.MarketParameters)
-  if (params) parts.push(params)
+  const parts = [prettifyMarketType(d.SuperOddsType), ...prettifyMarketParams(d.MarketParameters)]
   const period = prettifyMarketPeriod(d.MarketPeriod)
   if (period) parts.push(period)
   return parts.join(' · ')
 }
 
-// key is the line's lineKey; pass it only when the chip should open that
-// line's history panel on click (the main table). History-panel chips pass
-// no key and render as plain, non-interactive badges.
-function formatMarketChip(label, key) {
-  if (!label || label === '—') return '—'
-  if (key) return `<span class="chip-market chip-market-click" data-line-key="${esc(key)}">${esc(label)}</span>`
-  return `<span class="chip-market">${esc(label)}</span>`
+// parts is a marketParts() result. key is the line's lineKey; pass it only
+// when the chip should open that line's history panel on click (the main
+// table). History-panel chips pass no key and render as plain,
+// non-interactive badges. Each component (type / line / period) renders as
+// its own colored box so they read as distinct facets of the market rather
+// than one run-on label.
+function formatMarketChip(parts, key) {
+  if (!parts || !parts.type) return '—'
+  const boxes = [`<span class="chip-market-part chip-market-type">${esc(parts.type)}</span>`]
+  for (const p of parts.params) {
+    boxes.push(`<span class="chip-market-part chip-market-param">${esc(p)}</span>`)
+  }
+  if (parts.period) {
+    boxes.push(`<span class="chip-market-part chip-market-period">${esc(parts.period)}</span>`)
+  }
+  const inner = boxes.join('')
+  const cls = key ? 'chip-market-group chip-market-click' : 'chip-market-group'
+  const attr = key ? ` data-line-key="${esc(key)}"` : ''
+  return `<span class="${cls}"${attr}>${inner}</span>`
 }
 
 function marketSignature(d) {
@@ -177,7 +204,8 @@ function ensureLine(fid, marketSig) {
       order: lineOrderCounter++,  // stable display order, first-seen wins
       superOddsType: null,    // raw SuperOddsType, used to pick the default line
       marketPeriod: null,     // raw MarketPeriod — same SuperOddsType can exist both for full match and per-half
-      market: '—',
+      market: '—',            // flat text form (marketLabel)
+      marketParts: null,      // boxed-chip form (marketParts) — { type, params, period }
       pricesData: null,       // { prices, priceNames }
       priceDirs: null,        // array parallel to prices.prices — cleared/replaced on the line's next update, not on a timer
       lastPrices: null,
@@ -231,7 +259,7 @@ function renderHistoryPanel() {
   const fx = line ? fixtures.get(line.fixtureId) : null
   historyTitle.innerHTML = line
     ? `<div class="history-title-fixture">${esc(fx ? fx.name : String(line.fixtureId))}</div>
-       <div class="history-title-market">${formatMarketChip(line.market)}</div>`
+       <div class="history-title-market">${formatMarketChip(line.marketParts)}</div>`
     : esc(String(openLineKey))
   const entries = history.get(openLineKey) || []
   historyList.innerHTML = entries.length === 0
@@ -311,7 +339,7 @@ function render() {
           </td>`
       }
       html += `
-          <td class="market">${formatMarketChip(line.market, line.key)}</td>
+          <td class="market">${formatMarketChip(line.marketParts, line.key)}</td>
           <td class="prices">${line.pricesData ? formatPrices(line.pricesData.prices, line.pricesData.priceNames, line.priceDirs) : '—'}</td>
         </tr>`
     })
@@ -435,6 +463,7 @@ async function init() {
       line.superOddsType = d.SuperOddsType
       line.marketPeriod = d.MarketPeriod || null
       line.market = marketLabel(d)
+      line.marketParts = marketParts(d)
       line.pricesData = { prices: d.Prices || null, priceNames: d.PriceNames || null }
       line.priceDirs = directions
       line.lastPrices = d.Prices ? [...d.Prices] : null
