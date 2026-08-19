@@ -145,7 +145,7 @@ const historyClose = document.getElementById('historyClose')
 
 function ensureFixture(fid) {
   if (!fixtures.has(fid)) {
-    fixtures.set(fid, { name: String(fid), competition: '—', kickoff: '—', updated: '', updateCount: 0, expanded: false })
+    fixtures.set(fid, { name: String(fid), competition: '—', kickoff: '—', kickoffTs: null, updated: '', updateCount: 0, expanded: false })
   }
   return fixtures.get(fid)
 }
@@ -158,6 +158,7 @@ function resolveNameFromCache(fid) {
   fx.name = `${fix.Participant1} vs ${fix.Participant2}`
   fx.competition = fix.Competition
   fx.kickoff = formatKickoff(fix.StartTime)
+  fx.kickoffTs = fix.StartTime || null
 }
 
 // One line per distinct market (marketSig) per fixture, so a fixture with
@@ -276,11 +277,20 @@ function render() {
     if (!groups.has(line.fixtureId)) groups.set(line.fixtureId, [])
     groups.get(line.fixtureId).push(line)
   }
-  const fixtureIds = [...groups.keys()].sort((a, b) => a - b)
+  // Newest kickoff first; fixtures whose kickoff hasn't resolved yet (name
+  // lookup still pending) sort to the bottom rather than jumbling in at "0".
+  const fixtureIds = [...groups.keys()].sort((a, b) => {
+    const tsA = fixtures.get(a)?.kickoffTs
+    const tsB = fixtures.get(b)?.kickoffTs
+    if (tsA == null && tsB == null) return a - b
+    if (tsA == null) return 1
+    if (tsB == null) return -1
+    return tsB - tsA
+  })
 
   let html = ''
   for (const fid of fixtureIds) {
-    const fx = fixtures.get(fid) || { name: String(fid), competition: '—', kickoff: '—', updated: '', updateCount: 0, expanded: false }
+    const fx = fixtures.get(fid) || { name: String(fid), competition: '—', kickoff: '—', kickoffTs: null, updated: '', updateCount: 0, expanded: false }
     const groupLines = groups.get(fid).sort((a, b) => a.order - b.order)
     const isExpandable = groupLines.length > 1
     const visibleLines = fx.expanded ? groupLines : [pickDefaultLine(groupLines)].filter(Boolean)
