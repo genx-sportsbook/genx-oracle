@@ -9,6 +9,9 @@
   --accent-violet: #a5a6f6;
   --accent-teal: #2dd4bf;
   --accent-amber: #fbbf24;
+  --accent-purple: #a855f7;
+  --accent-blue: #3b82f6;
+  --accent-grey: #6b7280;
   --tick-up: #34d399;
   --tick-down: #fb7185;
   --row-flash: #142334;
@@ -217,7 +220,7 @@ td.fix-name {
 
 .fix-updated {
   margin-top: 4px;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-muted);
   opacity: 0.75;
 }
@@ -278,21 +281,22 @@ td.market {
 }
 
 .chip-market-type {
-  --part-color: var(--market-color);
-  --part-border: rgba(125, 211, 252, 0.45);
-  --part-bg: rgba(125, 211, 252, 0.1);
+  --part-color: var(--accent-purple);
+  --part-border: rgba(168, 85, 247, 0.55);
+  --part-bg: rgba(168, 85, 247, 0.14);
+  font-weight: 700;
 }
 
 .chip-market-param {
-  --part-color: var(--accent-violet);
-  --part-border: rgba(165, 166, 246, 0.45);
-  --part-bg: rgba(165, 166, 246, 0.1);
+  --part-color: var(--accent-blue);
+  --part-border: rgba(59, 130, 246, 0.5);
+  --part-bg: rgba(59, 130, 246, 0.12);
 }
 
 .chip-market-period {
-  --part-color: var(--accent-amber);
-  --part-border: rgba(251, 191, 36, 0.45);
-  --part-bg: rgba(251, 191, 36, 0.1);
+  --part-color: var(--accent-grey);
+  --part-border: rgba(107, 114, 128, 0.4);
+  --part-bg: rgba(107, 114, 128, 0.1);
 }
 
 /* Clickable only in the main table — opens this line's history panel. */
