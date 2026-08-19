@@ -90,9 +90,9 @@ docker run -p 8000:8000 \
   txline-server
 ```
 
-GitHub Actions (`.github/workflows/docker.yml`) builds and pushes to `ghcr.io/teamzuzu/txline-server` automatically:
-- Push to `main` → `:latest`
-- Push a `v*.*.*` tag → versioned tag + `:latest`
+GitHub Actions (`.github/workflows/docker.yml`) builds and pushes to `ghcr.io/teamzuzu/txline-server`. It's `workflow_dispatch`-only (no automatic push trigger) — run it manually from the Actions tab, from the branch or tag you want to build:
+- Run from `main` → `:latest`
+- Run from a `v*.*.*` tag → versioned tag + `:latest`
 
 ## Kubernetes / Helm
 
@@ -154,7 +154,7 @@ helm install txline-server txline/txline-server \
 1. Bump `version` and `appVersion` in `helm/txline-server/Chart.yaml` to match the release (e.g. `1.0.0`)
 2. Commit: `git commit -m "chore: bump chart to 1.0.0"`
 3. Tag: `git tag v1.0.0 && git push origin v1.0.0`
-4. Both `docker.yml` and `helm-release.yml` workflows fire automatically
+4. Both `docker.yml` and `helm-release.yml` are `workflow_dispatch`-only — trigger each manually from the Actions tab (choose the `v1.0.0` tag as the ref to run from)
 
 Key values to override: `image.repository`, `image.tag`, `ingress.host`, `ingress.className`.
 
