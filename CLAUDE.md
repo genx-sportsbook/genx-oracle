@@ -54,13 +54,18 @@ The credential lifecycle is:
 
 **`txline-server`** (`txline/api/server.py`) is a FastAPI app that proxies the three TxLINE endpoints (`GET /fixtures`, `GET /odds/stream`, `GET /scores/stream`) and serves a vanilla JS browser dashboard at `/`. Static files live in `txline/api/static/` (`index.html`, `app.js`, `style.css`), mounted via `StaticFiles`; a `no_cache` middleware forces `Cache-Control: no-store` on every response so edits to `app.js`/`style.css` are always picked up without a hard refresh (`StaticFiles` alone only sends `Last-Modified`/`ETag`, which Chrome/Safari can serve stale from heuristic cache). CORS is open (`allow_origins=["*"]`).
 
-The browser dashboard fetches `/fixtures` on load for name/competition resolution, then opens two `EventSource` connections and updates a live table, one row-group per fixture:
+The browser dashboard ("GENX-SPORTSBOOK" in the topbar — styled to match the genx-sportsbook.com logo, `Black Ops One` font with a cyan/pink split, name only) fetches `/fixtures` on load for name/competition resolution, then opens two `EventSource` connections and updates a live table, one row-group per fixture:
 
-- **State model** — two `Map`s: `fixtures` (per-fixture metadata: name, competition, kickoff, last-updated, update count) and `lines` (per-market data, keyed by `` `${fixtureId}::${marketSignature}` ``, where `marketSignature` is `` `${SuperOddsType}|${MarketParameters}|${MarketPeriod}` ``). This split lets one fixture track several concurrent markets (Match Odds, Asian Handicap, Over/Under, 1st/2nd half variants) without one overwriting another.
-- **Market names** — `SuperOddsType`/`MarketParameters`/`MarketPeriod` are raw vendor codes (e.g. `1X2_PARTICIPANT_RESULT`, `line=-0.25`, `half=1`) not enumerated in TxLINE's docs or OpenAPI spec; `app.js` hardcodes a lookup (`MARKET_TYPE_NAMES`, `PARAM_KEY_NAMES`, `HALF_NAMES`) built from values captured off the live feed, rendering e.g. `Asian Handicap · Line -0.25 · 1st Half`.
+- **State model** — two `Map`s: `fixtures` (per-fixture metadata: name, competition, kickoff, `kickoffTs`, last-updated, update count) and `lines` (per-market data, keyed by `` `${fixtureId}::${marketSignature}` ``, where `marketSignature` is `` `${SuperOddsType}|${MarketParameters}|${MarketPeriod}` ``). This split lets one fixture track several concurrent markets (Match Odds, Asian Handicap, Over/Under, 1st/2nd half variants) without one overwriting another.
+- **Fixture ordering** — the fixture list sorts by `kickoffTs` ascending (soonest kickoff first); fixtures whose kickoff hasn't resolved yet sort to the bottom instead of jumbling in at `0`.
+- **Market ordering within a fixture** — `compareLines()` sorts an expanded fixture's markets into a fixed order: Match Odds first, then Asian Handicap, then Over/Under (`MARKET_TYPE_ORDER`), each ranked by numeric line ascending (parsed from the raw `MarketParameters` string via `lineParamValue()`), full-match before per-half periods, unrecognized types last, first-seen order as the final tiebreak. This replaced a naive first-seen (insertion order) sort, which made the market list jump around as updates arrived in arbitrary order.
+- **Market names** — `SuperOddsType`/`MarketParameters`/`MarketPeriod` are raw vendor codes (e.g. `1X2_PARTICIPANT_RESULT`, `line=-0.25`, `half=1`) not enumerated in TxLINE's docs or OpenAPI spec (confirmed by an exhaustive sitemap sweep of every documentation page — none mention `MarketPeriod` at all); `app.js` hardcodes a lookup (`MARKET_TYPE_NAMES`, `PARAM_KEY_NAMES`, `HALF_NAMES`) built from values captured off the live feed. `"half=1"` → `"1st Half"` is a best-effort reading of that convention, not a vendor-confirmed fact.
+- **Market chip display** — each market renders as three separate colored boxes rather than one flattened string: type (bold purple), line/param (blue), period (grey) — built by `marketParts()`/`formatMarketChip()`.
 - **Default line per fixture** — collapsed rows show one market via `pickDefaultLine()`, which prefers the full-match Match Odds line (`SuperOddsType === '1X2_PARTICIPANT_RESULT' && !marketPeriod`) over any other line, falling back to the most recently updated one. Matching only on `SuperOddsType` without excluding `marketPeriod` was a real bug — it let a 1st-half Match Odds line win over the full-match one. Clicking a fixture expands it to show every tracked line.
 - **Tick highlighting** — a line's up/down flash (`chip-up`/`chip-down`) persists until that line's *next* update recomputes direction; there is no timeout that clears it early.
+- **Odds display** — prices are stored as integers and always rendered to 3 decimal places (`(price / 1000).toFixed(3)`), in both the main table and the history panel.
 - **Competition filter** — a hand-built dropdown (`div`/`ul[role=listbox]`, not a native `<select>`) in the top bar filters the table to one competition. It's custom-built rather than a native `<select>` because Chrome/Safari on macOS hand the open `<select>` list off to the OS to render, so it can't be themed there (only Firefox lets CSS reach it); the custom version renders identically everywhere and supports click, keyboard (arrows/Enter/Escape), and click-outside-to-close.
+- **Update counters** — the topbar shows a running total of odds updates received this session (`totalUpdateCount`); when a competition is selected in the dropdown, it switches to that competition's own count instead (tracked per-competition in `competitionUpdateCounts`, via `updateTotalUpdatesDisplay()`).
 - **History panel** — scoped per-market (keyed by the same `lineKey`, not per-fixture), opened by clicking a market chip in the main table.
 
 SSE events use named types (`event: odds`, `event: scores`, `event: heartbeat`).
@@ -90,7 +95,7 @@ docker run -p 8000:8000 \
   txline-server
 ```
 
-GitHub Actions (`.github/workflows/docker.yml`) builds and pushes to `ghcr.io/teamzuzu/txline-server`. It's `workflow_dispatch`-only (no automatic push trigger) — run it manually from the Actions tab, from the branch or tag you want to build:
+GitHub Actions (`.github/workflows/docker.yml`) builds and pushes to `ghcr.io/genx-sportsbook/txline-server`. It's `workflow_dispatch`-only (no automatic push trigger) — run it manually from the Actions tab, from the branch or tag you want to build:
 - Run from `main` → `:latest`
 - Run from a `v*.*.*` tag → versioned tag + `:latest`
 
@@ -104,7 +109,7 @@ Two ways to supply credentials:
 ```bash
 helm install txline-server helm/txline-server/ \
   --set credentials.json="$(base64 -w0 .txline-credentials.json)" \
-  --set image.repository=ghcr.io/teamzuzu/txline-server \
+  --set image.repository=ghcr.io/genx-sportsbook/txline-server \
   --set image.tag=latest \
   --set ingress.host=txline.example.com
 ```
@@ -118,7 +123,7 @@ kubectl create secret generic txline-credentials \
 # Install without passing the JSON:
 helm install txline-server helm/txline-server/ \
   --set credentials.existingSecret=txline-credentials \
-  --set image.repository=ghcr.io/teamzuzu/txline-server \
+  --set image.repository=ghcr.io/genx-sportsbook/txline-server \
   --set image.tag=latest \
   --set ingress.host=txline.example.com
 ```
