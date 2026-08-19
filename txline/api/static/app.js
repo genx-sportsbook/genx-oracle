@@ -153,6 +153,7 @@ let flashTimer = null
 let openLineKey = null
 let selectedCompetition = ''  // '' = no filter, show every competition
 let highlightedIndex = -1     // index into dropdownOptions(), for keyboard nav
+let totalUpdateCount = 0      // odds updates received across every fixture/market, for the whole session
 
 const tbody = document.getElementById('rows')
 const competitionDropdown = document.getElementById('competitionDropdown')
@@ -160,6 +161,7 @@ const competitionTrigger = document.getElementById('competitionTrigger')
 const competitionTriggerLabel = document.getElementById('competitionTriggerLabel')
 const competitionList = document.getElementById('competitionList')
 const fixtureCountEl = document.getElementById('fixtureCount')
+const totalUpdatesEl = document.getElementById('totalUpdates')
 const lastUpdateEl = document.getElementById('lastUpdate')
 const clockEl = document.getElementById('clock')
 const statusDotEl = document.getElementById('statusDot')
@@ -470,7 +472,9 @@ async function init() {
       line.updated = timeNow()
       fx.updated = line.updated  // fixture-level "last updated across any of its lines"
       fx.updateCount++  // total odds updates received for this fixture, across all its markets
+      totalUpdateCount++  // total odds updates received across every fixture/market
       lastUpdateEl.textContent = `Updated ${fx.updated}`  // global "last update across the whole feed"
+      totalUpdatesEl.textContent = `${totalUpdateCount} update${totalUpdateCount === 1 ? '' : 's'}`
 
       pushHistory(line.key, d)
       flash(line.key)
