@@ -1,7 +1,7 @@
 replicaCount: 1
 
 image:
-  repository: ghcr.io/OWNER/txline-server  # replace OWNER with your GitHub org or username
+  repository: ghcr.io/genx-sportsbook/txline-server:latest
   tag: latest
   pullPolicy: IfNotPresent
 
