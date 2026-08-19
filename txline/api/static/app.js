@@ -206,6 +206,7 @@ function ensureLine(fid, marketSig) {
       fixtureId: fid,
       order: lineOrderCounter++,  // stable display order, first-seen wins
       superOddsType: null,    // raw SuperOddsType, used to pick the default line
+      marketParameters: null, // raw MarketParameters ("line=-0.25"), used to sort lines numerically
       marketPeriod: null,     // raw MarketPeriod — same SuperOddsType can exist both for full match and per-half
       market: '—',            // flat text form (marketLabel)
       marketParts: null,      // boxed-chip form (marketParts) — { type, params, period }
@@ -231,6 +232,42 @@ function pickDefaultLine(groupLines) {
   const matchOdds = groupLines.find(l => l.superOddsType === MATCH_ODDS_TYPE && !l.marketPeriod)
   if (matchOdds) return matchOdds
   return groupLines.reduce((latest, l) => (!latest || l.updated > latest.updated) ? l : latest, null)
+}
+
+// Expanded-fixture market order: Match Odds first, then Asian Handicap, then
+// Over/Under, then anything unrecognized (in first-seen order). Types not
+// listed here rank after all of these rather than being interleaved.
+const MARKET_TYPE_ORDER = [MATCH_ODDS_TYPE, 'ASIANHANDICAP_PARTICIPANT_GOALS', 'OVERUNDER_PARTICIPANT_GOALS']
+
+function marketTypeRank(superOddsType) {
+  const idx = MARKET_TYPE_ORDER.indexOf(superOddsType)
+  return idx === -1 ? MARKET_TYPE_ORDER.length : idx
+}
+
+// Pulls the numeric line value out of MarketParameters ("line=-0.25" -> -0.25)
+// for numeric sorting. Only "line=<number>" has been observed on the wire;
+// lines with no parseable value sort after ones that have one.
+function lineParamValue(line) {
+  if (!line.marketParameters) return null
+  const match = line.marketParameters.match(/line=(-?[\d.]+)/)
+  return match ? parseFloat(match[1]) : null
+}
+
+// Sorts an expanded fixture's markets into a consistent order: by market
+// type first (see MARKET_TYPE_ORDER), then by numeric line ascending within
+// a type, then full-match before per-half periods, falling back to
+// first-seen order when nothing else distinguishes two lines.
+function compareLines(a, b) {
+  const typeDiff = marketTypeRank(a.superOddsType) - marketTypeRank(b.superOddsType)
+  if (typeDiff !== 0) return typeDiff
+  const va = lineParamValue(a)
+  const vb = lineParamValue(b)
+  if (va != null && vb != null && va !== vb) return va - vb
+  if (va == null && vb != null) return 1
+  if (va != null && vb == null) return -1
+  const periodDiff = (a.marketPeriod || '').localeCompare(b.marketPeriod || '')
+  if (periodDiff !== 0) return periodDiff
+  return a.order - b.order
 }
 
 function computeDirections(line, prices) {
@@ -322,7 +359,7 @@ function render() {
   let html = ''
   for (const fid of fixtureIds) {
     const fx = fixtures.get(fid) || { name: String(fid), competition: '—', kickoff: '—', kickoffTs: null, updated: '', updateCount: 0, expanded: false }
-    const groupLines = groups.get(fid).sort((a, b) => a.order - b.order)
+    const groupLines = groups.get(fid).sort(compareLines)
     const isExpandable = groupLines.length > 1
     const visibleLines = fx.expanded ? groupLines : [pickDefaultLine(groupLines)].filter(Boolean)
 
@@ -475,6 +512,7 @@ async function init() {
       const directions = computeDirections(line, d.Prices)
 
       line.superOddsType = d.SuperOddsType
+      line.marketParameters = d.MarketParameters || null
       line.marketPeriod = d.MarketPeriod || null
       line.market = marketLabel(d)
       line.marketParts = marketParts(d)
