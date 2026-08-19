@@ -1,0 +1,52 @@
+name: Publish Helm chart to GitHub Pages
+
+# Packages helm/txline-server and pushes the .tgz straight onto the
+# gh-pages branch alongside index.yaml — no GitHub Release is created.
+# GitHub Pages serves the chart directly from that branch.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Package chart
+        run: |
+          mkdir -p .deploy
+          helm package helm/txline-server --destination .deploy
+          echo "PACKAGE_NAME=$(basename "$(ls .deploy/*.tgz)" .tgz)" >> "$GITHUB_ENV"
+
+      - name: Checkout gh-pages branch
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: gh-pages
+
+      - name: Add package to index
+        run: |
+          cp .deploy/*.tgz gh-pages/
+          helm repo index gh-pages --url https://genx-sportsbook.github.io/genx-oracle --merge gh-pages/index.yaml
+
+      - name: Commit and push
+        run: |
+          cd gh-pages
+          git config user.name "simonccc"
+          git config user.email "simonc@gmail.com"
+          git add .
+          if git diff --cached --quiet; then
+            echo "Nothing new to publish"
+            exit 0
+          fi
+          git commit -m "Publish ${PACKAGE_NAME}"
+          git push

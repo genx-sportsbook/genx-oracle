@@ -141,7 +141,7 @@ helm upgrade txline-server helm/txline-server/ \
 Once GitHub Pages is enabled (Settings → Pages → `gh-pages` / root), the chart is available at:
 
 ```bash
-helm repo add txline https://teamzuzu.github.io/genx-oracle
+helm repo add txline https://genx-sportsbook.github.io/genx-oracle
 helm repo update
 helm install txline-server txline/txline-server \
   --set credentials.existingSecret=txline-credentials \
@@ -149,12 +149,14 @@ helm install txline-server txline/txline-server \
   --set ingress.host=txline.example.com
 ```
 
+`.github/workflows/helm-pages.yml` (`workflow_dispatch`-only) publishes it: `helm package`s `helm/txline-server`, then pushes the `.tgz` straight onto the `gh-pages` branch alongside a merged `index.yaml` — GitHub Pages serves the chart file directly from that branch. There's no `helm/chart-releaser-action` and no GitHub Release involved; this project doesn't use GitHub Releases.
+
 ### Release checklist (before tagging)
 
 1. Bump `version` and `appVersion` in `helm/txline-server/Chart.yaml` to match the release (e.g. `1.0.0`)
 2. Commit: `git commit -m "chore: bump chart to 1.0.0"`
 3. Tag: `git tag v1.0.0 && git push origin v1.0.0`
-4. Both `docker.yml` and `helm-release.yml` are `workflow_dispatch`-only — trigger each manually from the Actions tab (choose the `v1.0.0` tag as the ref to run from)
+4. Trigger `docker.yml` and `helm-pages.yml` manually from the Actions tab (both `workflow_dispatch`-only) — for `docker.yml`, choose the `v1.0.0` tag as the ref to run from
 
 Key values to override: `image.repository`, `image.tag`, `ingress.host`, `ingress.className`.
 
