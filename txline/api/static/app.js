@@ -277,7 +277,7 @@ function render() {
     if (!groups.has(line.fixtureId)) groups.set(line.fixtureId, [])
     groups.get(line.fixtureId).push(line)
   }
-  // Newest kickoff first; fixtures whose kickoff hasn't resolved yet (name
+  // Soonest kickoff first; fixtures whose kickoff hasn't resolved yet (name
   // lookup still pending) sort to the bottom rather than jumbling in at "0".
   const fixtureIds = [...groups.keys()].sort((a, b) => {
     const tsA = fixtures.get(a)?.kickoffTs
@@ -285,7 +285,7 @@ function render() {
     if (tsA == null && tsB == null) return a - b
     if (tsA == null) return 1
     if (tsB == null) return -1
-    return tsB - tsA
+    return tsA - tsB
   })
 
   let html = ''
