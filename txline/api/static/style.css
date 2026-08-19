@@ -40,11 +40,17 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
+/* Matches the genx-sportsbook.com logo treatment (Black Ops One,
+   cyan/pink) — name only, rest of this page keeps its own palette. */
 .title {
-  color: var(--accent-cyan);
+  font-family: 'Black Ops One', cursive;
+  color: #00f5ff;
   font-size: 20px;
-  font-weight: bold;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.05em;
+}
+
+.title-accent {
+  color: #ff006e;
 }
 
 .topbar-right {
