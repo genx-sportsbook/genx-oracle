@@ -53,6 +53,25 @@ body {
   color: #ff006e;
 }
 
+.topbar-left {
+  display: flex;
+  align-items: baseline;
+}
+
+.powered-by {
+  margin-left: 14px;
+  color: var(--text-muted);
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  text-decoration: none;
+  border-bottom: 1px dotted var(--text-muted);
+}
+
+.powered-by:hover {
+  color: var(--accent-cyan);
+  border-bottom-color: var(--accent-cyan);
+}
+
 .topbar-right {
   display: flex;
   align-items: center;
