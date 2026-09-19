@@ -152,11 +152,13 @@ let lastFlashKey = null
 let flashTimer = null
 let openLineKey = null
 let selectedCompetition = ''  // '' = no filter, show every competition
+let searchQuery = ''          // '' = no filter; lowercased substring matched against fixture name
 let highlightedIndex = -1     // index into dropdownOptions(), for keyboard nav
 let totalUpdateCount = 0      // odds updates received across every fixture/market, for the whole session
 const competitionUpdateCounts = new Map()  // competition name -> odds updates received for that competition
 
 const tbody = document.getElementById('rows')
+const fixtureSearchInput = document.getElementById('fixtureSearch')
 const competitionDropdown = document.getElementById('competitionDropdown')
 const competitionTrigger = document.getElementById('competitionTrigger')
 const competitionTriggerLabel = document.getElementById('competitionTriggerLabel')
@@ -175,9 +177,15 @@ const historyClose = document.getElementById('historyClose')
 
 function ensureFixture(fid) {
   if (!fixtures.has(fid)) {
-    fixtures.set(fid, { name: String(fid), competition: '—', kickoff: '—', kickoffTs: null, updated: '', updateCount: 0, expanded: false })
+    fixtures.set(fid, { name: String(fid), competition: '—', kickoff: '—', kickoffTs: null, updated: '', updatedAtMs: null, updateCount: 0, expanded: false })
   }
   return fixtures.get(fid)
+}
+
+const RECENT_UPDATE_WINDOW_MS = 30000
+
+function isRecentlyUpdated(fx) {
+  return fx.updatedAtMs != null && (Date.now() - fx.updatedAtMs) < RECENT_UPDATE_WINDOW_MS
 }
 
 function resolveNameFromCache(fid) {
@@ -342,6 +350,10 @@ function render() {
       const fx = fixtures.get(line.fixtureId)
       if (!fx || fx.competition !== selectedCompetition) continue
     }
+    if (searchQuery) {
+      const fx = fixtures.get(line.fixtureId)
+      if (!fx || !fx.name.toLowerCase().includes(searchQuery)) continue
+    }
     if (!groups.has(line.fixtureId)) groups.set(line.fixtureId, [])
     groups.get(line.fixtureId).push(line)
   }
@@ -358,7 +370,7 @@ function render() {
 
   let html = ''
   for (const fid of fixtureIds) {
-    const fx = fixtures.get(fid) || { name: String(fid), competition: '—', kickoff: '—', kickoffTs: null, updated: '', updateCount: 0, expanded: false }
+    const fx = fixtures.get(fid) || { name: String(fid), competition: '—', kickoff: '—', kickoffTs: null, updated: '', updatedAtMs: null, updateCount: 0, expanded: false }
     const groupLines = groups.get(fid).sort(compareLines)
     const isExpandable = groupLines.length > 1
     const visibleLines = fx.expanded ? groupLines : [pickDefaultLine(groupLines)].filter(Boolean)
@@ -372,8 +384,8 @@ function render() {
           : ''
         html += `
           <td class="fix-name${isExpandable ? ' expandable' : ''}" rowspan="${visibleLines.length}" data-fid="${fid}">
-            <div class="fix-title">${esc(fx.name)}</div>
-            <div class="fix-sub">${esc(fx.kickoff)} · ${esc(fx.competition)}</div>
+            <div class="fix-title">${isRecentlyUpdated(fx) ? '<span class="recent-dot" title="Updated in the last 30s"></span>' : ''}${esc(fx.name)}</div>
+            <div class="fix-sub">${esc(fx.kickoff)} · ${fx.competition && fx.competition !== '—' ? `<span class="competition-link" data-competition="${esc(fx.competition)}">${esc(fx.competition)}</span>` : esc(fx.competition)}</div>
             <div class="fix-updated">${fx.updated ? `Updated ${esc(fx.updated)} · ${fx.updateCount} update${fx.updateCount === 1 ? '' : 's'}` : ''}</div>
             ${expandHint}
           </td>`
@@ -521,6 +533,7 @@ async function init() {
       line.lastPrices = d.Prices ? [...d.Prices] : null
       line.updated = timeNow()
       fx.updated = line.updated  // fixture-level "last updated across any of its lines"
+      fx.updatedAtMs = Date.now()
       fx.updateCount++  // total odds updates received for this fixture, across all its markets
       totalUpdateCount++  // total odds updates received across every fixture/market
       if (fx.competition && fx.competition !== '—') {
@@ -539,7 +552,15 @@ async function init() {
   })
 
   tickClock()
-  setInterval(tickClock, 1000)
+  // Re-render every second too, not just on odds events, so a fixture's
+  // recent-update dot (see RECENT_UPDATE_WINDOW_MS) disappears on its own
+  // once the window elapses instead of waiting for the next update.
+  setInterval(() => { tickClock(); render() }, 1000)
+
+  fixtureSearchInput.addEventListener('input', () => {
+    searchQuery = fixtureSearchInput.value.trim().toLowerCase()
+    render()
+  })
 
   competitionTrigger.addEventListener('click', () => toggleDropdown())
 
@@ -591,6 +612,12 @@ async function init() {
     const chip = e.target.closest('.chip-market-click')
     if (chip) {
       openPanel(chip.dataset.lineKey)
+      return
+    }
+    const competitionLink = e.target.closest('.competition-link')
+    if (competitionLink) {
+      e.stopPropagation()
+      selectCompetition(competitionLink.dataset.competition, competitionLink.dataset.competition)
       return
     }
     const nameCell = e.target.closest('.fix-name')

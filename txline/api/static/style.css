@@ -47,6 +47,7 @@ body {
   color: #00f5ff;
   font-size: 20px;
   letter-spacing: 0.05em;
+  text-decoration: none;
 }
 
 .title-accent {
@@ -79,6 +80,28 @@ body {
   color: var(--text-muted);
   font-size: 14px;
   letter-spacing: 0.05em;
+}
+
+.fixture-search {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 7px 12px;
+  font-family: inherit;
+  font-size: 14px;
+  width: 180px;
+}
+
+.fixture-search::placeholder {
+  color: var(--text-muted);
+}
+
+.fixture-search:hover,
+.fixture-search:focus-visible {
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.35);
+  outline: none;
 }
 
 /* Custom dropdown — a native <select>'s open list can't be themed in
@@ -234,6 +257,17 @@ td.fix-name {
   color: var(--accent-purple);
 }
 
+.recent-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  margin-bottom: 1px;
+  border-radius: 50%;
+  background: var(--accent-cyan);
+  box-shadow: 0 0 6px var(--accent-cyan);
+}
+
 .fix-sub {
   margin-top: 2px;
   font-size: 14px;
@@ -241,6 +275,15 @@ td.fix-name {
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+.competition-link {
+  cursor: pointer;
+}
+
+.competition-link:hover {
+  color: var(--accent-cyan);
+  text-decoration: underline;
 }
 
 .fix-updated {
