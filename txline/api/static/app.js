@@ -109,6 +109,173 @@ function marketSignature(d) {
   return `${d.SuperOddsType}|${d.MarketParameters || ''}|${d.MarketPeriod || ''}`
 }
 
+// --- Score / match-event decoding ---
+//
+// Mirrors txline/soccer.py (see that module's docstring for provenance):
+// enum values and the Status Id table come from TxODDS' "Scores Product API
+// documentation, Soccer v1.1" PDF, the authoritative spec for this feed (it
+// isn't covered by the public txline-docs site at all). The nested score
+// object's exact key casing hasn't been observed on a live event yet — no
+// ticketed fixture was in-running while this was built — so `pick()` tries
+// every casing variant defensively instead of assuming one.
+
+const GAME_STATE_BY_ID = {
+  1: 'Not Started', 2: '1st Half', 3: 'Half Time', 4: '2nd Half', 5: 'Finished',
+  6: 'Waiting for Extra Time', 7: 'Extra Time 1st Half', 8: 'Extra Time Half Time',
+  9: 'Extra Time 2nd Half', 10: 'Finished (Extra Time)', 11: 'Waiting for Penalties',
+  12: 'Penalty Shootout', 13: 'Finished (Penalties)', 14: 'Interrupted',
+  15: 'Abandoned', 16: 'Cancelled', 17: 'Coverage Cancelled', 18: 'Coverage Suspended',
+  19: 'Postponed',
+}
+
+const GAME_STATE_BY_CODE = {
+  NS: 'Not Started', H1: '1st Half', HT: 'Half Time', H2: '2nd Half', F: 'Finished',
+  WET: 'Waiting for Extra Time', ET1: 'Extra Time 1st Half', HTET: 'Extra Time Half Time',
+  ET2: 'Extra Time 2nd Half', FET: 'Finished (Extra Time)', WPE: 'Waiting for Penalties',
+  PE: 'Penalty Shootout', FPE: 'Finished (Penalties)', I: 'Interrupted', A: 'Abandoned',
+  C: 'Cancelled', TXCC: 'Coverage Cancelled', TXCS: 'Coverage Suspended', P: 'Postponed',
+}
+
+const LIVE_STATES = new Set([
+  '1st Half', '2nd Half', 'Extra Time 1st Half', 'Extra Time 2nd Half', 'Penalty Shootout',
+])
+
+// Fixture.GameState (numeric, from /fixtures) or ScoreUpdate.gameState (short
+// code, from live score events) — same enum, two wire representations.
+function gameStateLabel(value) {
+  if (value === null || value === undefined) return null
+  if (typeof value === 'number') return GAME_STATE_BY_ID[value] || `Unknown (${value})`
+  return GAME_STATE_BY_CODE[value] || value
+}
+
+// Compact badge text — the full label ("Not Started", "Extra Time 1st Half")
+// is too much to show inline on every single fixture row, most of which are
+// just "Not Started". Shown as the badge text with the full label as a
+// hover tooltip instead.
+const GAME_STATE_SHORT_BY_ID = {
+  1: 'NS', 2: '1H', 3: 'HT', 4: '2H', 5: 'FT',
+  6: 'WAIT-ET', 7: 'ET1', 8: 'ET-HT', 9: 'ET2', 10: 'ET-FT',
+  11: 'WAIT-PEN', 12: 'PEN', 13: 'PEN-FT', 14: 'INT',
+  15: 'ABAN', 16: 'CANC', 17: 'CANC', 18: 'SUSP', 19: 'POSTP',
+}
+const GAME_STATE_SHORT_BY_CODE = {
+  NS: 'NS', H1: '1H', HT: 'HT', H2: '2H', F: 'FT',
+  WET: 'WAIT-ET', ET1: 'ET1', HTET: 'ET-HT', ET2: 'ET2', FET: 'ET-FT',
+  WPE: 'WAIT-PEN', PE: 'PEN', FPE: 'PEN-FT', I: 'INT', A: 'ABAN',
+  C: 'CANC', TXCC: 'CANC', TXCS: 'SUSP', P: 'POSTP',
+}
+
+function gameStateShort(value) {
+  if (value === null || value === undefined) return null
+  if (typeof value === 'number') return GAME_STATE_SHORT_BY_ID[value] || `#${value}`
+  return GAME_STATE_SHORT_BY_CODE[value] || value
+}
+
+function pick(obj, ...keys) {
+  if (!obj) return undefined
+  for (const k of keys) {
+    if (obj[k] !== undefined) return obj[k]
+  }
+  return undefined
+}
+
+function periodStats(period) {
+  if (!period) return { goals: 0, yellowCards: 0, redCards: 0, corners: 0 }
+  return {
+    goals: pick(period, 'Goals', 'goals') || 0,
+    yellowCards: pick(period, 'YellowCards', 'yellowCards') || 0,
+    redCards: pick(period, 'RedCards', 'redCards') || 0,
+    corners: pick(period, 'Corners', 'corners') || 0,
+  }
+}
+
+// Best-effort decode of the match's aggregate goals/cards/corners so far.
+// Prefers scoreSoccer (per-period breakdown), falls back to the generic
+// `score` field. Returns null if neither is present — per the vendor PDF,
+// score-shaped fields only appear on actions that actually change the
+// scoreline, not on every event.
+function scoreBreakdown(d) {
+  const src = d.scoreSoccer || d.score
+  if (!src) return null
+  const p1 = pick(src, 'Participant1', 'participant1')
+  const p2 = pick(src, 'Participant2', 'participant2')
+  if (p1 == null && p2 == null) return null
+  const total1 = pick(p1, 'Total', 'total') || p1
+  const total2 = pick(p2, 'Total', 'total') || p2
+  return { participant1: periodStats(total1), participant2: periodStats(total2) }
+}
+
+// Enum labels, confirmed against the PDF's "Amend <X> Action" tables (p.4-6).
+const SHOT_OUTCOME_LABELS = { OnTarget: 'On Target', OffTarget: 'Off Target', Woodwork: 'Woodwork', Blocked: 'Blocked' }
+const FREE_KICK_LABELS = { Safe: 'Safe', Attack: 'Attacking', Danger: 'Dangerous', HighDanger: 'High Danger', Offside: 'Offside' }
+const RED_CARD_LABELS = { StraightRed: 'Straight Red', SecondYellow: 'Second Yellow' }
+const GOAL_TYPE_LABELS = { Shot: 'Shot', Head: 'Header', Own: 'Own Goal', Other: 'Other' }
+const PENALTY_OUTCOME_LABELS = { Scored: 'Scored', Missed: 'Missed', Retake: 'Retake' }
+const THROW_IN_LABELS = { Safe: 'Safe', Attack: 'Attacking', Danger: 'Dangerous' }
+const VAR_OUTCOME_LABELS = { Stands: 'Stands', Overturned: 'Overturned' }
+
+// Fallback for the ~30 other action types the PDF documents (Kickoff,
+// Substitution, Lineup, Status, ...) that don't carry a distinctive enum
+// worth a bespoke case below.
+function prettifyAction(action) {
+  return action
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')  // split PascalCase ("FreeKick" -> "Free Kick")
+    .replace(/[_-]/g, ' ')
+    .split(' ').filter(Boolean)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ')
+}
+
+// One entry {icon, cls, text} describing a score-stream event, for the
+// per-fixture match-events ticker.
+function describeScoreEvent(d) {
+  const action = (d.action || '').trim()
+  const data = d.dataSoccer || d.data || {}
+  const key = action.toLowerCase().replace(/[_\s]/g, '')
+
+  if (key === 'goal') {
+    const label = GOAL_TYPE_LABELS[pick(data, 'GoalType', 'goalType')]
+    return { icon: '⚽', cls: 'evt-goal', text: 'GOAL' + (label ? ` — ${label}` : '') }
+  }
+  if (key === 'yellowcard') return { icon: '🟨', cls: 'evt-yellow', text: 'Yellow Card' }
+  if (key === 'redcard') {
+    const label = RED_CARD_LABELS[pick(data, 'Type', 'type')]
+    return { icon: '🟥', cls: 'evt-red', text: 'Red Card' + (label ? ` — ${label}` : '') }
+  }
+  if (key === 'corner') return { icon: '🚩', cls: 'evt-corner', text: 'Corner' }
+  if (key === 'shot') {
+    const label = SHOT_OUTCOME_LABELS[pick(data, 'Outcome', 'outcome')]
+    return { icon: '🎯', cls: 'evt-shot', text: 'Shot' + (label ? ` — ${label}` : '') }
+  }
+  if (key === 'freekick') {
+    const label = FREE_KICK_LABELS[pick(data, 'FreeKickType', 'freeKickType')]
+    return { icon: '🦵', cls: 'evt-freekick', text: 'Free Kick' + (label ? ` — ${label}` : '') }
+  }
+  if (key === 'throwin') {
+    const label = THROW_IN_LABELS[pick(data, 'ThrowInType', 'throwInType')]
+    return { icon: '↩️', cls: 'evt-throwin', text: 'Throw In' + (label ? ` — ${label}` : '') }
+  }
+  if (key === 'penaltyattempt') return { icon: '⚠️', cls: 'evt-penalty', text: 'Penalty Awarded' }
+  if (key === 'penaltyoutcome') {
+    const label = PENALTY_OUTCOME_LABELS[pick(data, 'Outcome', 'outcome')]
+    return { icon: '🥅', cls: 'evt-penalty', text: 'Penalty' + (label ? ` — ${label}` : '') }
+  }
+  if (key === 'var') return { icon: '📺', cls: 'evt-var', text: 'VAR Review' }
+  if (key === 'varend') {
+    const label = VAR_OUTCOME_LABELS[pick(data, 'Outcome', 'outcome')]
+    return { icon: '📺', cls: 'evt-var', text: 'VAR Decision' + (label ? ` — ${label}` : '') }
+  }
+  if (key === 'substitution') return { icon: '🔃', cls: 'evt-sub', text: 'Substitution' }
+  if (key === 'kickoff') return { icon: '🏁', cls: 'evt-kickoff', text: 'Kickoff' }
+  if (key === 'halftimefinalised') return { icon: '⏸️', cls: 'evt-status', text: 'Half Time' }
+  if (key === 'gamefinalised') return { icon: '🏆', cls: 'evt-status', text: 'Full Time' }
+  if (key === 'injury') return { icon: '🩹', cls: 'evt-status', text: 'Injury' }
+  if (key === 'suspend') return { icon: '⏹️', cls: 'evt-status', text: 'Suspended' }
+  if (key === 'standby') return { icon: '⏳', cls: 'evt-status', text: 'Standby' }
+  if (!action) return { icon: '•', cls: 'evt-generic', text: 'Update' }
+  return { icon: '•', cls: 'evt-generic', text: prettifyAction(action) }
+}
+
 const CHIP_HUES = 3  // cycle cyan / violet / teal per price position
 
 // directions is an optional array parallel to prices: 'up' | 'down' | null per index
@@ -123,6 +290,19 @@ function formatPrices(prices, priceNames, directions) {
     const hue = i % CHIP_HUES
     return `<span class="chip chip-${hue}${dirClass}"><span class="chip-label">${label}</span><span class="chip-value">${arrow}${val}</span></span>`
   }).join('')
+}
+
+// Renders the 🟨/🟥/🚩 mini-stats row under a fixture's name from a
+// scoreBreakdown() result. Only shown once at least one of the three has a
+// nonzero count on either side, so a scoreless/card-free match stays clean.
+function statsRowHtml(stats) {
+  if (!stats) return ''
+  const { participant1: p1, participant2: p2 } = stats
+  const parts = []
+  if (p1.yellowCards || p2.yellowCards) parts.push(`<span class="stat-pill stat-yellow">🟨 ${p1.yellowCards}–${p2.yellowCards}</span>`)
+  if (p1.redCards || p2.redCards) parts.push(`<span class="stat-pill stat-red">🟥 ${p1.redCards}–${p2.redCards}</span>`)
+  if (p1.corners || p2.corners) parts.push(`<span class="stat-pill stat-corner">🚩 ${p1.corners}–${p2.corners}</span>`)
+  return parts.length ? `<div class="fix-stats">${parts.join('')}</div>` : ''
 }
 
 function timeNow() {
@@ -147,10 +327,12 @@ const fixturesCache = new Map()  // fixtureId (number) -> Fixture object from /f
 const fixtures = new Map()       // fixtureId (number) -> { name, competition, kickoff }
 const lines = new Map()          // lineKey (fixtureId::marketSig) -> line row object, one per market/line
 const history = new Map()        // lineKey -> array of {ts, pricesHtml}, newest first, one market/line per entry
+const scoreEvents = new Map()    // fixtureId -> array of {ts, icon, cls, text}, newest first, one per score event
 let lineOrderCounter = 0
 let lastFlashKey = null
 let flashTimer = null
-let openLineKey = null
+let openLineKey = null    // market history panel — set when that panel is open
+let openEventsFid = null  // match-events panel — set when that panel is open
 let selectedCompetition = ''  // '' = no filter, show every competition
 let searchQuery = ''          // '' = no filter; lowercased substring matched against fixture name
 let highlightedIndex = -1     // index into dropdownOptions(), for keyboard nav
@@ -174,10 +356,21 @@ const historyTitle = document.getElementById('historyTitle')
 const historyList = document.getElementById('historyList')
 const backdrop = document.getElementById('backdrop')
 const historyClose = document.getElementById('historyClose')
+const eventsPanel = document.getElementById('eventsPanel')
+const eventsTitle = document.getElementById('eventsTitle')
+const eventsList = document.getElementById('eventsList')
+const eventsClose = document.getElementById('eventsClose')
 
 function ensureFixture(fid) {
   if (!fixtures.has(fid)) {
-    fixtures.set(fid, { name: String(fid), competition: '—', kickoff: '—', kickoffTs: null, updated: '', updatedAtMs: null, updateCount: 0, expanded: false })
+    fixtures.set(fid, {
+      name: String(fid), competition: '—', kickoff: '—', kickoffTs: null, updated: '', updatedAtMs: null, updateCount: 0, expanded: false,
+      stateCode: null,   // raw GameState (int) or gameState (short code) — see gameStateShort()
+      stateLabel: null,  // human label, e.g. "1st Half" — from a live score event or the /fixtures snapshot
+      isLive: false,     // true while the ball's in play (see LIVE_STATES)
+      scoreText: null,   // "2 – 1", set once a score event with a decodable scoreline arrives
+      stats: null,       // { participant1, participant2 } goals/cards/corners breakdown, see scoreBreakdown()
+    })
   }
   return fixtures.get(fid)
 }
@@ -190,13 +383,22 @@ function isRecentlyUpdated(fx) {
 
 function resolveNameFromCache(fid) {
   const fx = fixtures.get(fid)
-  if (fx.name !== String(fid)) return  // already resolved
   const fix = fixturesCache.get(fid)
   if (!fix) return
-  fx.name = `${fix.Participant1} vs ${fix.Participant2}`
-  fx.competition = fix.Competition
-  fx.kickoff = formatKickoff(fix.StartTime)
-  fx.kickoffTs = fix.StartTime || null
+  if (fx.name === String(fid)) {
+    fx.name = `${fix.Participant1} vs ${fix.Participant2}`
+    fx.competition = fix.Competition
+    fx.kickoff = formatKickoff(fix.StartTime)
+    fx.kickoffTs = fix.StartTime || null
+  }
+  // Seed the status badge from the /fixtures snapshot (e.g. "Not Started")
+  // for fixtures that haven't produced a live score event yet — a live event's
+  // gameState always overwrites this once one arrives, since it's more current.
+  if (fx.stateLabel == null && fix.GameState != null) {
+    fx.stateCode = fix.GameState
+    fx.stateLabel = gameStateLabel(fix.GameState)
+    fx.isLive = LIVE_STATES.has(fx.stateLabel)
+  }
 }
 
 // One line per distinct market (marketSig) per fixture, so a fixture with
@@ -222,6 +424,7 @@ function ensureLine(fid, marketSig) {
       priceDirs: null,        // array parallel to prices.prices — cleared/replaced on the line's next update, not on a timer
       lastPrices: null,
       updated: '',
+      updateCount: 0,  // odds updates received for this specific market/line
     })
   }
   return lines.get(key)
@@ -240,6 +443,26 @@ function pickDefaultLine(groupLines) {
   const matchOdds = groupLines.find(l => l.superOddsType === MATCH_ODDS_TYPE && !l.marketPeriod)
   if (matchOdds) return matchOdds
   return groupLines.reduce((latest, l) => (!latest || l.updated > latest.updated) ? l : latest, null)
+}
+
+// Within one market type (e.g. every Asian Handicap line for a fixture),
+// picks the representative variant shown when that type's group is
+// collapsed: the full-match variant if there is one, otherwise whichever
+// variant was updated most recently — same rule as pickDefaultLine, just
+// scoped to lines that already share a type.
+function pickDefaultVariant(typeLines) {
+  const noPeriod = typeLines.filter(l => !l.marketPeriod)
+  const pool = noPeriod.length ? noPeriod : typeLines
+  return pool.reduce((latest, l) => (!latest || l.updated > latest.updated) ? l : latest, null)
+}
+
+// Per-(fixture, market type) expand state for the variant tree — separate
+// from fx.expanded, which only controls whether the fixture shows one line
+// or all of them grouped by type.
+const expandedMarketGroups = new Set()
+
+function marketGroupKey(fid, superOddsType) {
+  return `${fid}::${superOddsType}`
 }
 
 // Expanded-fixture market order: Match Odds first, then Asian Handicap, then
@@ -276,6 +499,38 @@ function compareLines(a, b) {
   const periodDiff = (a.marketPeriod || '').localeCompare(b.marketPeriod || '')
   if (periodDiff !== 0) return periodDiff
   return a.order - b.order
+}
+
+// Builds the row list for an expanded fixture: one row per market TYPE
+// (Match Odds, Asian Handicap, Over/Under, ...) showing its default variant,
+// with a "N variants" toggle in place of listing every line/period
+// combination flat. A type with only one variant just shows that line
+// directly, with no group toggle (nothing to expand). Expanding a group
+// (see expandedMarketGroups) swaps its single row for all of its variant
+// rows, in the same order compareLines already sorted them into.
+function buildExpandedDisplayList(fid, sortedLines) {
+  const result = []
+  let i = 0
+  while (i < sortedLines.length) {
+    const type = sortedLines[i].superOddsType
+    const variants = []
+    while (i < sortedLines.length && sortedLines[i].superOddsType === type) {
+      variants.push(sortedLines[i])
+      i++
+    }
+    if (variants.length === 1) {
+      result.push({ kind: 'single', line: variants[0] })
+      continue
+    }
+    if (expandedMarketGroups.has(marketGroupKey(fid, type))) {
+      variants.forEach((line, idx) => result.push({
+        kind: 'variant', line, groupType: type, count: variants.length, isFirstOfGroup: idx === 0,
+      }))
+    } else {
+      result.push({ kind: 'group', line: pickDefaultVariant(variants), groupType: type, count: variants.length })
+    }
+  }
+  return result
 }
 
 function computeDirections(line, prices) {
@@ -320,17 +575,55 @@ function renderHistoryPanel() {
       `).join('')
 }
 
-function openPanel(key) {
+function openMarketPanel(key) {
+  closeEventsPanel()
   openLineKey = key
   historyPanel.classList.add('open')
   backdrop.classList.add('open')
   renderHistoryPanel()
 }
 
-function closePanel() {
+function closeMarketPanel() {
   openLineKey = null
   historyPanel.classList.remove('open')
   backdrop.classList.remove('open')
+}
+
+function renderEventsPanel() {
+  if (openEventsFid == null) return
+  const fx = fixtures.get(openEventsFid)
+  eventsTitle.innerHTML = fx
+    ? `<div class="history-title-fixture">${esc(fx.name)}</div><div class="history-title-market">Match Events</div>`
+    : 'Match Events'
+  const entries = scoreEvents.get(openEventsFid) || []
+  eventsList.innerHTML = entries.length === 0
+    ? `<p class="history-empty">No match events yet.</p>`
+    : entries.map(e => `
+        <div class="history-entry event-entry ${esc(e.cls)}">
+          <span class="h-time">${esc(e.ts)}</span>
+          <span class="event-icon">${e.icon}</span>
+          <span class="event-text">${esc(e.text)}</span>
+        </div>
+      `).join('')
+}
+
+function openEventsPanel(fid) {
+  closeMarketPanel()
+  openEventsFid = fid
+  eventsPanel.classList.add('open')
+  backdrop.classList.add('open')
+  renderEventsPanel()
+}
+
+function closeEventsPanel() {
+  openEventsFid = null
+  eventsPanel.classList.remove('open')
+  backdrop.classList.remove('open')
+}
+
+function closeAllPanels() {
+  closeMarketPanel()
+  closeEventsPanel()
 }
 
 // --- Flash ---
@@ -373,25 +666,54 @@ function render() {
     const fx = fixtures.get(fid) || { name: String(fid), competition: '—', kickoff: '—', kickoffTs: null, updated: '', updatedAtMs: null, updateCount: 0, expanded: false }
     const groupLines = groups.get(fid).sort(compareLines)
     const isExpandable = groupLines.length > 1
-    const visibleLines = fx.expanded ? groupLines : [pickDefaultLine(groupLines)].filter(Boolean)
+    const marketTypeCount = new Set(groupLines.map(l => l.superOddsType)).size
+    const displayItems = fx.expanded
+      ? buildExpandedDisplayList(fid, groupLines)
+      : [{ kind: 'single', line: pickDefaultLine(groupLines) }].filter(item => item.line)
 
-    visibleLines.forEach((line, i) => {
+    displayItems.forEach((item, i) => {
+      const line = item.line
       const isFirst = i === 0
       html += `<tr class="${line.key === lastFlashKey ? 'flash' : ''}${isFirst ? ' group-start' : ''}">`
       if (isFirst) {
         const expandHint = isExpandable
-          ? `<div class="fix-expand">${fx.expanded ? '▲ Hide markets' : `▼ ${groupLines.length} markets`}</div>`
+          ? `<div class="fix-expand">${fx.expanded ? '▲ Hide markets' : `▼ ${marketTypeCount} market type${marketTypeCount === 1 ? '' : 's'}`}</div>`
+          : ''
+        const stateShort = fx.stateCode != null ? gameStateShort(fx.stateCode) : null
+        const stateHtml = stateShort
+          ? `<span class="state-badge${fx.isLive ? ' state-live' : ''}" title="${esc(fx.stateLabel || stateShort)}">${fx.isLive ? '<span class="state-dot"></span>' : ''}${esc(stateShort)}</span>`
+          : ''
+        const scoreHtml = fx.scoreText ? `<span class="fix-score">${esc(fx.scoreText)}</span>` : ''
+        const statsHtml = statsRowHtml(fx.stats)
+        const eventCount = (scoreEvents.get(fid) || []).length
+        const eventsLinkHtml = eventCount
+          ? `<div class="fix-events-link" data-events-fid="${fid}">📋 ${eventCount} match event${eventCount === 1 ? '' : 's'}</div>`
           : ''
         html += `
-          <td class="fix-name${isExpandable ? ' expandable' : ''}" rowspan="${visibleLines.length}" data-fid="${fid}">
-            <div class="fix-title">${isRecentlyUpdated(fx) ? '<span class="recent-dot" title="Updated in the last 30s"></span>' : ''}${esc(fx.name)}</div>
+          <td class="fix-name${isExpandable ? ' expandable' : ''}" rowspan="${displayItems.length}" data-fid="${fid}">
+            <div class="fix-title">${isRecentlyUpdated(fx) ? '<span class="recent-dot" title="Updated in the last 30s"></span>' : ''}${stateHtml}${esc(fx.name)}${scoreHtml}</div>
             <div class="fix-sub">${esc(fx.kickoff)} · ${fx.competition && fx.competition !== '—' ? `<span class="competition-link" data-competition="${esc(fx.competition)}">${esc(fx.competition)}</span>` : esc(fx.competition)}</div>
+            ${statsHtml}
+            ${eventsLinkHtml}
             <div class="fix-updated">${fx.updated ? `Updated ${esc(fx.updated)} · ${fx.updateCount} update${fx.updateCount === 1 ? '' : 's'}` : ''}</div>
             ${expandHint}
           </td>`
       }
+      // A market-type group collapses to its default variant with a "N
+      // variants" toggle; expanding it swaps that one row for all of its
+      // variant rows (marked .market-variant for the tree-guide styling),
+      // with the toggle moving to "Hide variants" on the first of them.
+      const groupToggleHtml = item.kind === 'group'
+        ? `<div class="market-group-toggle" data-group-fid="${fid}" data-group-type="${esc(item.groupType)}">▼ ${item.count} variants</div>`
+        : (item.kind === 'variant' && item.isFirstOfGroup)
+          ? `<div class="market-group-toggle" data-group-fid="${fid}" data-group-type="${esc(item.groupType)}">▲ Hide variants</div>`
+          : ''
       html += `
-          <td class="market">${formatMarketChip(line.marketParts, line.key)}</td>
+          <td class="market${item.kind === 'variant' ? ' market-variant' : ''}">
+            ${formatMarketChip(line.marketParts, line.key)}
+            ${groupToggleHtml}
+            <div class="market-updated">${line.updated ? `Updated ${esc(line.updated)} · ${line.updateCount} update${line.updateCount === 1 ? '' : 's'}` : ''}</div>
+          </td>
           <td class="prices">${line.pricesData ? formatPrices(line.pricesData.prices, line.pricesData.priceNames, line.priceDirs) : '—'}</td>
         </tr>`
     })
@@ -532,6 +854,7 @@ async function init() {
       line.priceDirs = directions
       line.lastPrices = d.Prices ? [...d.Prices] : null
       line.updated = timeNow()
+      line.updateCount++  // odds updates received for this specific market/line
       fx.updated = line.updated  // fixture-level "last updated across any of its lines"
       fx.updatedAtMs = Date.now()
       fx.updateCount++  // total odds updates received for this fixture, across all its markets
@@ -548,6 +871,42 @@ async function init() {
       if (openLineKey === line.key) renderHistoryPanel()
     } catch (err) {
       console.warn('Bad odds event:', err)
+    }
+  })
+
+  // Scores stream — separate connection from odds (different endpoint,
+  // fires far less often: only on actual score/match events, not every tick).
+  const scoresEs = new EventSource('/scores/stream')
+  scoresEs.addEventListener('scores', (e) => {
+    try {
+      const d = JSON.parse(e.data)
+      const fid = d.fixtureId
+      const fx = ensureFixture(fid)
+      resolveNameFromCache(fid)
+
+      const label = gameStateLabel(d.gameState)
+      if (label) {
+        fx.stateCode = d.gameState
+        fx.stateLabel = label
+        fx.isLive = LIVE_STATES.has(label)
+      }
+
+      const breakdown = scoreBreakdown(d)
+      if (breakdown) {
+        fx.stats = breakdown
+        fx.scoreText = `${breakdown.participant1.goals} – ${breakdown.participant2.goals}`
+      }
+
+      if (!scoreEvents.has(fid)) scoreEvents.set(fid, [])
+      const arr = scoreEvents.get(fid)
+      arr.unshift({ ts: timeNow(), ...describeScoreEvent(d) })
+      if (arr.length > HISTORY_LIMIT) arr.length = HISTORY_LIMIT
+
+      fx.updatedAtMs = Date.now()
+      render()
+      if (openEventsFid === fid) renderEventsPanel()
+    } catch (err) {
+      console.warn('Bad scores event:', err)
     }
   })
 
@@ -603,15 +962,31 @@ async function init() {
     if (!competitionDropdown.contains(e.target)) closeDropdown()
   })
 
-  historyClose.addEventListener('click', closePanel)
-  backdrop.addEventListener('click', closePanel)
+  historyClose.addEventListener('click', closeMarketPanel)
+  eventsClose.addEventListener('click', closeEventsPanel)
+  backdrop.addEventListener('click', closeAllPanels)
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closePanel()
+    if (e.key === 'Escape') closeAllPanels()
   })
   tbody.addEventListener('click', (e) => {
     const chip = e.target.closest('.chip-market-click')
     if (chip) {
-      openPanel(chip.dataset.lineKey)
+      openMarketPanel(chip.dataset.lineKey)
+      return
+    }
+    const eventsLink = e.target.closest('.fix-events-link')
+    if (eventsLink) {
+      e.stopPropagation()
+      openEventsPanel(Number(eventsLink.dataset.eventsFid))
+      return
+    }
+    const groupToggle = e.target.closest('.market-group-toggle')
+    if (groupToggle) {
+      e.stopPropagation()
+      const key = marketGroupKey(Number(groupToggle.dataset.groupFid), groupToggle.dataset.groupType)
+      if (expandedMarketGroups.has(key)) expandedMarketGroups.delete(key)
+      else expandedMarketGroups.add(key)
+      render()
       return
     }
     const competitionLink = e.target.closest('.competition-link')

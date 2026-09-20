@@ -14,6 +14,7 @@ class Fixture(BaseModel):
     Participant2: str
     FixtureId: int
     Participant1IsHome: bool
+    GameState: Optional[int] = None
 
 
 class OddsUpdate(BaseModel):

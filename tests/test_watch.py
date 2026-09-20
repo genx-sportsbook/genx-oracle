@@ -49,7 +49,7 @@ def test_build_table_columns():
     t = build_table({})
     cols = [c.header for c in t.columns]
     assert cols == ["Fixture", "Competition", "Kickoff", "Score", "State",
-                    "Market", "Prices", "Pct", "Updated"]
+                    "Cards/Corners", "Last Event", "Market", "Prices", "Pct", "Updated"]
 
 
 def test_build_table_empty():

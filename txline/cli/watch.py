@@ -13,6 +13,7 @@ from rich.table import Table
 
 from txline.client import TxLineClient
 from txline.models import Fixture, Heartbeat, OddsUpdate, ScoreUpdate
+from txline.soccer import describe_event, game_state_label, score_breakdown
 
 console = Console()
 
@@ -25,6 +26,8 @@ class FixtureState:
     kickoff: str = "—"
     score: str = "—"
     game_state: str = "—"
+    cards_corners: str = "—"
+    last_event: str = "—"
     market: str = "—"
     prices: str = "—"
     pct: str = "—"
@@ -48,6 +51,8 @@ def build_table(state: dict[int, FixtureState], flash_fid: int | None = None) ->
     t.add_column("Kickoff", style="dim")
     t.add_column("Score", style="bold green")
     t.add_column("State", style="yellow")
+    t.add_column("Cards/Corners", style="magenta")
+    t.add_column("Last Event", style="bright_white")
     t.add_column("Market", style="dim")
     t.add_column("Prices", style="bright_white")
     t.add_column("Pct", style="cyan")
@@ -60,6 +65,8 @@ def build_table(state: dict[int, FixtureState], flash_fid: int | None = None) ->
             fs.kickoff,
             fs.score,
             fs.game_state,
+            fs.cards_corners,
+            fs.last_event,
             fs.market,
             fs.prices,
             fs.pct,
@@ -87,6 +94,8 @@ def apply_event(
         fs.name = f"{fix.Participant1} vs {fix.Participant2}"
         fs.competition = fix.Competition
         fs.kickoff = datetime.fromtimestamp(fix.StartTime / 1000).strftime("%d %b %H:%M")
+        if fs.game_state == "—" and fix.GameState is not None:
+            fs.game_state = game_state_label(fix.GameState)
 
     if isinstance(event, OddsUpdate):
         fs.market = event.SuperOddsType
@@ -102,7 +111,15 @@ def apply_event(
         fs.pct = "  ".join(f"{p}%" for p in event.Pct) if event.Pct else "—"
     else:
         fs.score = parse_score(event)
-        fs.game_state = event.gameState
+        fs.game_state = game_state_label(event.gameState)
+        fs.last_event = describe_event(event)
+        breakdown = score_breakdown(event)
+        if breakdown:
+            p1, p2 = breakdown["participant1"], breakdown["participant2"]
+            fs.cards_corners = (
+                f"H 🟨{p1['yellow_cards']} 🟥{p1['red_cards']} 🚩{p1['corners']}  "
+                f"A 🟨{p2['yellow_cards']} 🟥{p2['red_cards']} 🚩{p2['corners']}"
+            )
 
     fs.updated = now
     return fid

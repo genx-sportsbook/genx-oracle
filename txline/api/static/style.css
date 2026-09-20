@@ -56,11 +56,12 @@ body {
 
 .topbar-left {
   display: flex;
-  align-items: baseline;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
 }
 
 .powered-by {
-  margin-left: 14px;
   color: var(--text-muted);
   font-size: 12px;
   letter-spacing: 0.05em;
@@ -288,10 +289,140 @@ td.fix-name {
 
 .fix-updated {
   margin-top: 4px;
-  font-size: 14px;
+  font-size: 12px;
   color: var(--text-muted);
   opacity: 0.75;
 }
+
+/* Same look as .fix-updated but a size step down — this is a separate class
+   (not a shared one) specifically so the per-market update line can be
+   tuned independently of the fixture-level one going forward. */
+.market-updated {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.75;
+}
+
+/* --- Match state / score / events (from the scores stream) --- */
+
+.state-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 8px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: middle;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.state-badge.state-live {
+  color: var(--accent-cyan);
+  border-color: rgba(56, 189, 248, 0.5);
+  background: rgba(56, 189, 248, 0.12);
+}
+
+.state-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-cyan);
+  box-shadow: 0 0 6px var(--accent-cyan);
+  animation: state-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes state-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.fix-score {
+  margin-left: 10px;
+  font-weight: bold;
+  color: var(--accent-teal);
+}
+
+.fix-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.stat-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid var(--part-border, var(--border));
+  background: var(--part-bg, transparent);
+  color: var(--part-color, var(--text));
+}
+
+.stat-pill.stat-yellow {
+  --part-color: var(--accent-amber);
+  --part-border: rgba(251, 191, 36, 0.5);
+  --part-bg: rgba(251, 191, 36, 0.12);
+}
+
+.stat-pill.stat-red {
+  --part-color: var(--tick-down);
+  --part-border: rgba(251, 113, 133, 0.5);
+  --part-bg: rgba(251, 113, 133, 0.12);
+}
+
+.stat-pill.stat-corner {
+  --part-color: var(--accent-blue);
+  --part-border: rgba(59, 130, 246, 0.5);
+  --part-bg: rgba(59, 130, 246, 0.12);
+}
+
+.fix-events-link {
+  margin-top: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-teal);
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.fix-events-link:hover {
+  color: var(--accent-cyan);
+}
+
+/* --- Match-events panel entries (reuses .history-entry from the market
+   history panel — see below — with a left accent bar per event type) --- */
+
+.event-entry {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  border-left: 3px solid var(--border);
+  padding-left: 10px;
+}
+
+.event-entry .event-text { color: var(--text); }
+
+.event-entry.evt-goal { border-left-color: var(--tick-up); }
+.event-entry.evt-yellow { border-left-color: var(--accent-amber); }
+.event-entry.evt-red { border-left-color: var(--tick-down); }
+.event-entry.evt-corner { border-left-color: var(--accent-blue); }
+.event-entry.evt-var { border-left-color: var(--accent-violet); }
+.event-entry.evt-penalty { border-left-color: var(--accent-purple); }
+.event-entry.evt-shot,
+.event-entry.evt-freekick,
+.event-entry.evt-throwin { border-left-color: var(--accent-teal); }
+.event-entry.evt-sub,
+.event-entry.evt-kickoff,
+.event-entry.evt-status,
+.event-entry.evt-generic { border-left-color: var(--accent-grey); }
 
 /* Only fixtures with more than one market are actually expandable —
    others get no pointer/hint since toggling would be a no-op. */
@@ -375,6 +506,37 @@ td.market {
 .chip-market-click:hover .chip-market-part {
   border-color: var(--accent-cyan);
   box-shadow: 0 0 8px rgba(56, 189, 248, 0.4);
+}
+
+/* --- Market-type grouping (variant tree) --- */
+
+.market-group-toggle {
+  margin-top: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-cyan);
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.market-group-toggle:hover {
+  color: var(--accent-teal);
+}
+
+/* A variant row, once its group is expanded, gets a dashed guide line to
+   read as nested under the group it belongs to rather than a sibling market. */
+td.market.market-variant {
+  padding-left: 32px;
+  position: relative;
+}
+
+td.market.market-variant::before {
+  content: '';
+  position: absolute;
+  left: 16px;
+  top: 0;
+  bottom: 0;
+  border-left: 1px dashed rgba(134, 160, 196, 0.3);
 }
 
 /* --- Price chips --- */
