@@ -24,7 +24,7 @@ FIXTURE_1 = Fixture(
 
 
 async def test_fixtures_returns_list(app):
-    with patch("txline.api.server.get_fixtures", new=AsyncMock(return_value=[FIXTURE_1])):
+    with patch("txline.api.server.get_fixtures_window", new=AsyncMock(return_value=[FIXTURE_1])):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             r = await c.get("/fixtures")
     assert r.status_code == 200
@@ -42,7 +42,7 @@ async def test_fixtures_passes_credentials(app):
         captured["api_token"] = api_token
         return []
 
-    with patch("txline.api.server.get_fixtures", new=mock_get_fixtures):
+    with patch("txline.api.server.get_fixtures_window", new=mock_get_fixtures):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             await c.get("/fixtures")
 
@@ -133,7 +133,7 @@ async def test_scores_stream_fixture_id_passthrough(app):
 
 
 async def test_cors_header_present(app):
-    with patch("txline.api.server.get_fixtures", new=AsyncMock(return_value=[])):
+    with patch("txline.api.server.get_fixtures_window", new=AsyncMock(return_value=[])):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             r = await c.get("/fixtures", headers={"Origin": "https://example.com"})
     assert r.headers.get("access-control-allow-origin") == "*"

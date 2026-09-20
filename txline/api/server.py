@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -15,16 +16,32 @@ from sse_starlette.sse import EventSourceResponse
 
 from txline.auth import load_credentials
 from txline.models import Heartbeat, TokenCredentials
-from txline.rest.fixtures import get_fixtures
+from txline.rest.fixtures import get_fixtures_window
 from txline.streams.odds import stream_odds
 from txline.streams.scores import stream_scores
 
 logger = logging.getLogger(__name__)
 DEFAULT_CREDS = Path(".txline-credentials.json")
 
+# get_fixtures_window fetches two full days' worth of the global fixture
+# catalog (~28MB each) to cover the yesterday/today bucket boundary — see
+# its docstring. That's cheap to pay once and share across every dashboard
+# page load/reconnect, but not on every single one of them, since schedule
+# data (names, kickoff times, competitions) barely changes minute to minute.
+FIXTURES_CACHE_TTL = 300  # seconds
+
 
 def create_app(creds: TokenCredentials) -> FastAPI:
     app = FastAPI(title="TxLINE Proxy")
+    fixtures_cache: dict = {"data": None, "fetched_at": 0.0}
+
+    async def get_cached_fixtures():
+        now = time.monotonic()
+        if fixtures_cache["data"] is None or now - fixtures_cache["fetched_at"] > FIXTURES_CACHE_TTL:
+            async with httpx.AsyncClient() as http:
+                fixtures_cache["data"] = await get_fixtures_window(http, creds.jwt, creds.api_token)
+            fixtures_cache["fetched_at"] = now
+        return fixtures_cache["data"]
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -45,8 +62,7 @@ def create_app(creds: TokenCredentials) -> FastAPI:
 
     @app.get("/fixtures")
     async def fixtures_endpoint():
-        async with httpx.AsyncClient() as http:
-            return await get_fixtures(http, creds.jwt, creds.api_token)
+        return await get_cached_fixtures()
 
     async def _odds_events(fixture_id: Optional[int]):
         async for event in stream_odds(creds.jwt, creds.api_token, fixture_id=fixture_id):

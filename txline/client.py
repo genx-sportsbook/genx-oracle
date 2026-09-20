@@ -8,7 +8,7 @@ import httpx
 
 from txline.auth import load_credentials, save_credentials
 from txline.models import Fixture, OddsUpdate, ScoreUpdate, Heartbeat, TokenCredentials
-from txline.rest.fixtures import get_fixtures
+from txline.rest.fixtures import get_fixtures, get_fixtures_window
 from txline.streams.odds import stream_odds
 from txline.streams.scores import stream_scores
 
@@ -55,11 +55,22 @@ class TxLineClient:
         start_epoch_day: Optional[int] = None,
         competition_id: Optional[int] = None,
     ) -> list[Fixture]:
-        return await get_fixtures(
+        # An explicit day gets exactly that day's bucket; the common "just
+        # give me the fixtures" call spans yesterday+today by default so a
+        # still-live match doesn't lose its name once its bucket rolls over
+        # — see get_fixtures_window's docstring.
+        if start_epoch_day is not None:
+            return await get_fixtures(
+                self._http,
+                self._jwt,
+                self._api_token,
+                start_epoch_day=start_epoch_day,
+                competition_id=competition_id,
+            )
+        return await get_fixtures_window(
             self._http,
             self._jwt,
             self._api_token,
-            start_epoch_day=start_epoch_day,
             competition_id=competition_id,
         )
 
