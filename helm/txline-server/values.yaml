@@ -1,8 +1,12 @@
 replicaCount: 1
 
 image:
-  repository: ghcr.io/genx-sportsbook/txline-server:latest
-  tag: latest
+  repository: ghcr.io/genx-sportsbook/txline-server
+  # Empty by default so it tracks the chart's own appVersion — bump
+  # appVersion in Chart.yaml (see the release checklist in CLAUDE.md) and
+  # `helm upgrade` deploys that version with no --set needed. Override only
+  # to pin a specific image tag independent of the chart version.
+  tag: ""
   pullPolicy: IfNotPresent
 
 service:

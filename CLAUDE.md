@@ -96,12 +96,15 @@ docker run -p 8000:8000 \
 ```
 
 GitHub Actions (`.github/workflows/docker.yml`) builds and pushes to `ghcr.io/genx-sportsbook/txline-server`. It's `workflow_dispatch`-only (no automatic push trigger) — run it manually from the Actions tab, from the branch or tag you want to build:
-- Run from `main` → `:latest`
-- Run from a `v*.*.*` tag → versioned tag + `:latest`
+- Run from a `v*.*.*` tag → that version only (e.g. `:1.0.0`) — this is the tag the Helm chart deploys, see below
+- Run from `main` → `:edge` (a moving convenience tag — never deploy this via Helm; the chart's `appVersion` default is what makes real releases reproducible)
+- Every run also gets an immutable `:sha-<short-sha>` tag regardless of ref
+
+Earlier versions of this workflow also pushed `:latest` on every run, including tagged releases, and the Helm chart's default `image.repository` had `:latest` baked directly into it. Combined, `helm upgrade --set image.tag=<new-version>` silently rendered a broken `repo:latest:<new-version>` image reference instead of the version being deployed — that's why a "release" often didn't actually change what was running. Both are fixed now: `image.repository` is a bare repo with no tag, and `image.tag` defaults to the chart's own `appVersion` (see `deployment.yaml`) — so bumping `appVersion` and deploying that chart version is enough on its own, no `--set image.tag` needed.
 
 ## Kubernetes / Helm
 
-The Helm chart lives at `helm/txline-server/`. Credentials are injected as a Kubernetes Secret.
+The Helm chart lives at `helm/txline-server/`. Credentials are injected as a Kubernetes Secret. `image.tag` defaults to the chart's `appVersion`, so the examples below only pass it to pin something different from the chart being installed.
 
 Two ways to supply credentials:
 
@@ -109,8 +112,6 @@ Two ways to supply credentials:
 ```bash
 helm install txline-server helm/txline-server/ \
   --set credentials.json="$(base64 -w0 .txline-credentials.json)" \
-  --set image.repository=ghcr.io/genx-sportsbook/txline-server \
-  --set image.tag=latest \
   --set ingress.host=txline.example.com
 ```
 
@@ -123,22 +124,18 @@ kubectl create secret generic txline-credentials \
 # Install without passing the JSON:
 helm install txline-server helm/txline-server/ \
   --set credentials.existingSecret=txline-credentials \
-  --set image.repository=ghcr.io/genx-sportsbook/txline-server \
-  --set image.tag=latest \
   --set ingress.host=txline.example.com
 ```
 
-**Upgrade:**
+**Upgrade** (from a local checkout that has pulled the new release commit — its `appVersion` is what gets deployed):
 ```bash
 # Option A:
 helm upgrade txline-server helm/txline-server/ \
-  --set credentials.json="$(base64 -w0 .txline-credentials.json)" \
-  --set image.tag=<new-version>
+  --set credentials.json="$(base64 -w0 .txline-credentials.json)"
 
 # Option B (secret already exists — no credentials needed):
 helm upgrade txline-server helm/txline-server/ \
-  --set credentials.existingSecret=txline-credentials \
-  --set image.tag=<new-version>
+  --set credentials.existingSecret=txline-credentials
 ```
 
 ### Published Helm repository
@@ -149,21 +146,32 @@ Once GitHub Pages is enabled (Settings → Pages → `gh-pages` / root), the cha
 helm repo add txline https://genx-sportsbook.github.io/genx-oracle
 helm repo update
 helm install txline-server txline/txline-server \
+  --version 1.0.0 \
   --set credentials.existingSecret=txline-credentials \
-  --set image.tag=1.0.0 \
   --set ingress.host=txline.example.com
 ```
 
+**Upgrade to a new release** — this is the actual "release a version, it gets deployed" step: publish the new chart version (release checklist below), then
+```bash
+helm repo update
+helm upgrade txline-server txline/txline-server \
+  --version 1.1.0 \
+  --set credentials.existingSecret=txline-credentials
+```
+`--version` selects the chart, whose `appVersion` (bumped in lockstep, see the release checklist) picks the matching image tag automatically — no `--set image.tag` needed, and no risk of the old `:latest` double-tag bug.
+
 `.github/workflows/helm-pages.yml` (`workflow_dispatch`-only) publishes it: `helm package`s `helm/txline-server`, then pushes the `.tgz` straight onto the `gh-pages` branch alongside a merged `index.yaml` — GitHub Pages serves the chart file directly from that branch. There's no `helm/chart-releaser-action` and no GitHub Release involved; this project doesn't use GitHub Releases.
 
-### Release checklist (before tagging)
+### Release checklist
 
-1. Bump `version` and `appVersion` in `helm/txline-server/Chart.yaml` to match the release (e.g. `1.0.0`)
-2. Commit: `git commit -m "chore: bump chart to 1.0.0"`
-3. Tag: `git tag v1.0.0 && git push origin v1.0.0`
-4. Trigger `docker.yml` and `helm-pages.yml` manually from the Actions tab (both `workflow_dispatch`-only) — for `docker.yml`, choose the `v1.0.0` tag as the ref to run from
+1. Bump `version` and `appVersion` in `helm/txline-server/Chart.yaml` together, to the same new version (e.g. `1.1.0`) — `version` is the chart's own version, `appVersion` is the image tag it deploys; keeping them equal is what makes `--version X.Y.Z` alone enough to deploy image `X.Y.Z`
+2. Update `CHANGELOG.md`
+3. Commit: `git commit -m "chore: bump chart to 1.1.0"`
+4. Tag: `git tag v1.1.0 && git push origin v1.1.0`
+5. Trigger `docker.yml` and `helm-pages.yml` manually from the Actions tab (both `workflow_dispatch`-only) — for `docker.yml`, choose the `v1.1.0` tag as the ref to run from
+6. Deploy it: `helm repo update && helm upgrade txline-server txline/txline-server --version 1.1.0 ...` (see above) — this is the step that was broken before; confirm the rollout actually picked up the new image with `kubectl rollout status deployment/txline-server` and `kubectl get pods -o jsonpath='{.items[*].spec.containers[*].image}'`
 
-Key values to override: `image.repository`, `image.tag`, `ingress.host`, `ingress.className`.
+Key values to override: `ingress.host`, `ingress.className`, `credentials.json`/`credentials.existingSecret`. `image.repository`/`image.tag` are there for pinning something other than the chart's own version, not needed for a normal release.
 
 ## Sensitive files (all gitignored)
 

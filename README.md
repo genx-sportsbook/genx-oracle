@@ -62,8 +62,8 @@ docker run -p 8000:8000 \
 helm repo add txline https://genx-sportsbook.github.io/genx-oracle
 helm repo update
 helm install txline-server txline/txline-server \
+  --version 1.0.0 \
   --set credentials.existingSecret=txline-credentials \
-  --set image.tag=latest \
   --set ingress.host=txline.example.com
 ```
 
