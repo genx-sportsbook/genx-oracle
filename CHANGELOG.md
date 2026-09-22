@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented here.
 
+## [1.0.2] - 2026-09-22
+
+### Fixed
+
+- `v1.0.1`'s `docker.yml` still pushed a floating `:latest` tag despite
+  removing the explicit `latest` entry from its tags list: `metadata-action`'s
+  `type=semver` tag carries an implicit `flavor.latest=auto` that adds
+  `:latest` on top whenever the ref is the highest semver version,
+  independent of the tags list. Now disabled explicitly
+  (`flavor: latest=false`) — a version-tag build produces only its exact
+  version tag (plus the always-present `:sha-<short>`), full stop.
+
 ## [1.0.1] - 2026-09-22
 
 ### Fixed

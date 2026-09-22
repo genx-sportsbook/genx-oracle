@@ -27,6 +27,13 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository_owner }}/txline-server
+          # metadata-action's type=semver tag carries an implicit
+          # flavor.latest=auto that adds a "latest" tag on top whenever the
+          # ref is the highest semver version, regardless of the tags list
+          # below — has to be turned off explicitly, or a real release
+          # still ends up shipping a floating :latest.
+          flavor: |
+            latest=false
           tags: |
             type=semver,pattern={{version}}
             type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}
