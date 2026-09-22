@@ -2,8 +2,18 @@ apiVersion: v1
 entries:
   txline-server:
   - apiVersion: v2
+    appVersion: 1.0.2
+    created: "2026-09-22T06:56:01.296126777Z"
+    description: TxLINE SSE proxy server
+    digest: fd6cee51a080e46aefc367a5d6022689508a1ecf8096e3a9be36d8409cdbc64b
+    name: txline-server
+    type: application
+    urls:
+    - https://genx-sportsbook.github.io/genx-oracle/txline-server-1.0.2.tgz
+    version: 1.0.2
+  - apiVersion: v2
     appVersion: 1.0.1
-    created: "2026-09-22T06:53:49.184970094Z"
+    created: "2026-09-22T06:56:01.295796294Z"
     description: TxLINE SSE proxy server
     digest: ea9dba58c3558d2898b1685395b412972830c95760ba0de4e86b20fd3d59e3dd
     name: txline-server
@@ -13,7 +23,7 @@ entries:
     version: 1.0.1
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2026-09-22T06:53:49.184683761Z"
+    created: "2026-09-22T06:56:01.295559193Z"
     description: TxLINE SSE proxy server
     digest: 293ba0784275d3c298ecd31c098400c34cad63c25058aaa6681a328a1fdea95f
     name: txline-server
@@ -23,7 +33,7 @@ entries:
     version: 1.0.0
   - apiVersion: v2
     appVersion: 0.0.1
-    created: "2026-09-22T06:53:49.184447773Z"
+    created: "2026-09-22T06:56:01.295321141Z"
     description: TxLINE SSE proxy server
     digest: 6ccc21ab46b80785188b873bdee405c2e646de6bf77b4134748f4033dc917afb
     name: txline-server
@@ -31,4 +41,4 @@ entries:
     urls:
     - https://genx-sportsbook.github.io/genx-oracle/txline-server-0.0.1.tgz
     version: 0.0.1
-generated: "2026-09-22T06:53:49.18410753Z"
+generated: "2026-09-22T06:56:01.294527595Z"
