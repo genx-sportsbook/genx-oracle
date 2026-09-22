@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented here.
 
+## [1.0.1] - 2026-09-22
+
+### Fixed
+
+- Helm releases silently not deploying: `values.yaml`'s default
+  `image.repository` had `:latest` baked into it, and the deployment
+  template appended another `:{{ .Values.image.tag }}` on top, so
+  `--set image.tag=<new-version>` rendered a broken double-tagged image
+  reference instead of the version being deployed.
+  - `image.repository` is now a bare repo; `image.tag` defaults to the
+    chart's own `appVersion`, so bumping `appVersion` and deploying that
+    chart version is enough on its own — no `--set image.tag` needed.
+  - `docker.yml` no longer pushes a floating `:latest` at all (it was
+    landing even on tagged-release builds): a version tag gets only its
+    exact version, `main` gets `:edge` (explicitly not for production),
+    and every build gets an immutable `:sha-<short>` tag.
+
 ## [1.0.0] - 2026-09-22
 
 First full release. `v0.0.1` was an early placeholder tag from the very
