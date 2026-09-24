@@ -8,6 +8,7 @@ from typing import Optional
 import httpx
 from httpx_sse import aconnect_sse
 
+from txline.exceptions import TxLineStreamError
 from txline.models import OddsUpdate, Heartbeat
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,12 @@ async def stream_odds(
 
     async with httpx.AsyncClient(timeout=None) as client:
         async with aconnect_sse(client, "GET", STREAM_URL, headers=headers, params=params) as src:
+            if src.response.status_code != 200:
+                body = (await src.response.aread()).decode("utf-8", errors="replace").strip()
+                raise TxLineStreamError(
+                    f"Odds stream request failed (status={src.response.status_code}, "
+                    f"fixture_id={fixture_id}): {body or '(empty response body)'}"
+                )
             async for event in src.aiter_sse():
                 if event.event == "heartbeat":
                     try:

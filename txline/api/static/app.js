@@ -366,7 +366,9 @@ function ensureFixture(fid) {
     fixtures.set(fid, {
       name: String(fid), competition: '—', kickoff: '—', kickoffTs: null, updated: '', updatedAtMs: null, updateCount: 0, expanded: false,
       stateCode: null,   // raw GameState (int) or gameState (short code) — see gameStateShort()
-      stateLabel: null,  // human label, e.g. "1st Half" — from a live score event or the /fixtures snapshot
+      stateLabel: null,  // human label, e.g. "1st Half" — set only from a live score event; the
+                         // /fixtures snapshot's GameState is stale (often stuck at "Not Started")
+                         // and isn't used here, so no badge shows until real score data arrives
       isLive: false,     // true while the ball's in play (see LIVE_STATES)
       scoreText: null,   // "2 – 1", set once a score event with a decodable scoreline arrives
       stats: null,       // { participant1, participant2 } goals/cards/corners breakdown, see scoreBreakdown()
@@ -390,14 +392,6 @@ function resolveNameFromCache(fid) {
     fx.competition = fix.Competition
     fx.kickoff = formatKickoff(fix.StartTime)
     fx.kickoffTs = fix.StartTime || null
-  }
-  // Seed the status badge from the /fixtures snapshot (e.g. "Not Started")
-  // for fixtures that haven't produced a live score event yet — a live event's
-  // gameState always overwrites this once one arrives, since it's more current.
-  if (fx.stateLabel == null && fix.GameState != null) {
-    fx.stateCode = fix.GameState
-    fx.stateLabel = gameStateLabel(fix.GameState)
-    fx.isLive = LIVE_STATES.has(fx.stateLabel)
   }
 }
 

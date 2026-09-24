@@ -94,8 +94,6 @@ def apply_event(
         fs.name = f"{fix.Participant1} vs {fix.Participant2}"
         fs.competition = fix.Competition
         fs.kickoff = datetime.fromtimestamp(fix.StartTime / 1000).strftime("%d %b %H:%M")
-        if fs.game_state == "—" and fix.GameState is not None:
-            fs.game_state = game_state_label(fix.GameState)
 
     if isinstance(event, OddsUpdate):
         fs.market = event.SuperOddsType

@@ -2,6 +2,32 @@
 
 All notable changes to this project are documented here.
 
+## [1.0.3] - 2026-09-24
+
+### Added
+
+- `scripts/check_scores_coverage.py` — watches the odds and scores streams
+  concurrently and, for every fixture the odds stream marks `InRunning`,
+  reports whether the scores stream is actually producing events for it.
+  Distinguishes a real scores-feed outage from a fixture simply not being on
+  TxLINE's scores coverage schedule (which only lists specific leagues, e.g.
+  NFL/MLS/Premier League — much narrower than odds coverage).
+
+### Fixed
+
+- `txline-watch` and the web dashboard's per-fixture state badge could get
+  stuck showing "Not Started"/`NS` for a match that had actually kicked off:
+  both seeded the badge from `/fixtures/snapshot`'s `GameState` field, which
+  isn't live-updated (it stayed `1`/`Not Started` for fixtures observed hours
+  into play). The badge is now set only from real live score events, so it
+  stays blank until one arrives instead of showing a stale, misleading status.
+- `stream_odds`/`stream_scores` raised a confusing `httpx_sse.SSEError`
+  ("Expected ... 'text/event-stream', got 'text/plain'") when the server
+  rejected a request (e.g. no ticket held for the given fixture), burying the
+  server's actual error message. Both now check the response status first and
+  raise a `TxLineStreamError` carrying the real body (e.g. "Bundle access
+  denied and no tickets held for fixture ...").
+
 ## [1.0.2] - 2026-09-22
 
 ### Fixed
