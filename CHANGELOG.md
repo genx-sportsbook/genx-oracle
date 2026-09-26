@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here.
 
+## [1.0.5] - 2026-09-26
+
+### Fixed
+
+- Clicking the GENX-SPORTSBOOK logo did a real page navigation (`href="/"`),
+  reloading the SPA and losing every fixture/odds/score received so far.
+  It now just resets the competition filter to "All Competitions" in place
+  (`preventDefault` + the same `selectCompetition('', ...)` path the
+  dropdown's own "All Competitions" option uses), so live data already in
+  memory is kept.
+
 ## [1.0.4] - 2026-09-26
 
 ### Fixed

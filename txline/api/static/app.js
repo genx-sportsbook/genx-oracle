@@ -341,6 +341,7 @@ const competitionUpdateCounts = new Map()  // competition name -> odds updates r
 
 const tbody = document.getElementById('rows')
 const fixtureSearchInput = document.getElementById('fixtureSearch')
+const logoLink = document.getElementById('logoLink')
 const competitionDropdown = document.getElementById('competitionDropdown')
 const competitionTrigger = document.getElementById('competitionTrigger')
 const competitionTriggerLabel = document.getElementById('competitionTriggerLabel')
@@ -920,6 +921,14 @@ async function init() {
   fixtureSearchInput.addEventListener('input', () => {
     searchQuery = fixtureSearchInput.value.trim().toLowerCase()
     render()
+  })
+
+  // Reset to "All Competitions" in place — not a real navigation, so the
+  // live odds/scores data already received isn't lost.
+  logoLink.addEventListener('click', (e) => {
+    e.preventDefault()
+    closeDropdown()
+    selectCompetition('', 'All Competitions')
   })
 
   competitionTrigger.addEventListener('click', () => toggleDropdown())
