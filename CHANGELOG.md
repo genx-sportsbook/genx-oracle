@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here.
 
+## [1.0.6] - 2026-09-26
+
+### Fixed
+
+- International-friendly fixtures (`Friendlies`, `Club Friendlies`,
+  `Youth Friendlies`, `Friendlies Women`) show up constantly in the odds
+  feed but weren't selectable in the competition filter — `v1.0.4`
+  hardcoded that dropdown to just TxLINE's confirmed-*scores*-coverage
+  leagues (MLS/NFL/Premier League), which isn't the same universe as odds
+  coverage. Added them to the hardcoded list.
+
 ## [1.0.5] - 2026-09-26
 
 ### Fixed
