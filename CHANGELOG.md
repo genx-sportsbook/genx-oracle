@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented here.
 
+## [1.0.4] - 2026-09-26
+
+### Fixed
+
+- Web dashboard's competition filter dropdown was slow to populate: it
+  derived its options by scanning the full `/fixtures` snapshot (tens of
+  thousands of fixtures worldwide, thousands of distinct competition names),
+  which the dropdown had to wait on before it could render at all.
+  Hardcoded instead to the competitions TxLINE's own coverage schedule
+  confirms are actually supported (`MLS`, `NFL`, `Premier League`) — the
+  dropdown now populates instantly at page load instead of waiting on that
+  fetch.
+
 ## [1.0.3] - 2026-09-24
 
 ### Added

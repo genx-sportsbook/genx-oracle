@@ -730,6 +730,14 @@ function setStatus(s) {
 // off to the OS to render, so CSS can't theme it there; only Firefox does.
 // This hand-built version themes identically in every browser.) ---
 
+// The dropdown used to derive its list from every Competition name in the
+// /fixtures snapshot — tens of thousands of fixtures worldwide, thousands of
+// distinct competition names — which is what made it slow to populate.
+// Hardcoded instead to the competitions TxLINE's own coverage schedule
+// (https://txline.txodds.com/documentation/scores/schedule) confirms are
+// actually supported in the free feed.
+const SUPPORTED_COMPETITIONS = ['MLS', 'NFL', 'Premier League']
+
 function populateCompetitionFilter(competitionNames) {
   ;[...competitionNames].sort().forEach((name, i) => {
     const li = document.createElement('li')
@@ -808,17 +816,16 @@ function selectCompetition(value, label) {
 // --- Startup ---
 
 async function init() {
+  populateCompetitionFilter(SUPPORTED_COMPETITIONS)
+
   // Fetch fixture names for name resolution (non-fatal on failure)
   try {
     const res = await fetch('/fixtures')
     if (res.ok) {
       const fixtures = await res.json()
-      const competitions = new Set()
       for (const f of fixtures) {
         fixturesCache.set(f.FixtureId, f)
-        if (f.Competition) competitions.add(f.Competition)
       }
-      populateCompetitionFilter(competitions)
     }
   } catch (err) {
     console.warn('Fixture fetch failed, running with raw IDs:', err)
