@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here.
 
+## [1.0.7] - 2026-09-26
+
+### Changed
+
+- `v1.0.6` added `Friendlies` plus its `Club`/`Youth`/`Women's` variants to
+  the competition dropdown; trimmed back to just `Friendlies`.
+
 ## [1.0.6] - 2026-09-26
 
 ### Fixed

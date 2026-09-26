@@ -735,14 +735,11 @@ function setStatus(s) {
 // /fixtures snapshot — tens of thousands of fixtures worldwide, thousands of
 // distinct competition names — which is what made it slow to populate.
 // Hardcoded instead to TxLINE's confirmed-scores-coverage leagues
-// (https://txline.txodds.com/documentation/scores/schedule) plus the
-// international-friendly competitions, which aren't on that schedule but
-// still show up constantly in the odds feed (unlike scores, odds coverage
-// isn't limited to that schedule).
-const SUPPORTED_COMPETITIONS = [
-  'MLS', 'NFL', 'Premier League',
-  'Friendlies', 'Club Friendlies', 'Youth Friendlies', 'Friendlies Women',
-]
+// (https://txline.txodds.com/documentation/scores/schedule) plus
+// "Friendlies", which isn't on that schedule but still shows up constantly
+// in the odds feed (unlike scores, odds coverage isn't limited to that
+// schedule).
+const SUPPORTED_COMPETITIONS = ['MLS', 'NFL', 'Premier League', 'Friendlies']
 
 function populateCompetitionFilter(competitionNames) {
   ;[...competitionNames].sort().forEach((name, i) => {
