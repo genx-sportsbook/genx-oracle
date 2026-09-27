@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here.
 
+## [1.0.8] - 2026-09-27
+
+### Fixed
+
+- `ScoreUpdate` was modeled with camelCase field names, but the live scores
+  SSE stream sends plain PascalCase (same convention as `OddsUpdate`) — every
+  score event was silently failing validation and being dropped. This broke
+  score data everywhere it's consumed: `txline-watch`, the web dashboard, and
+  the scores-coverage diagnostic script (`scripts/check_scores_coverage.py`),
+  which is what surfaced it. Aliased the model to the real wire keys.
+
 ## [1.0.7] - 2026-09-26
 
 ### Changed
