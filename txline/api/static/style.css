@@ -384,22 +384,58 @@ td.fix-name {
   --part-bg: rgba(59, 130, 246, 0.12);
 }
 
-/* Inline preview under the kickoff/competition line — same entries and
-   color-coding as the full match-events panel (.event-entry, below), just
-   sized down to fit inline and with no timestamp. */
+/* Inline preview under the kickoff/competition line — same events as the
+   full match-events panel (.event-entry, below) but deliberately quiet:
+   small, muted, low-contrast, so it reads as ambient detail rather than
+   competing with the fixture name/score/state badge above it. */
 .fix-recent-events {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
   margin-top: 6px;
 }
 
-.fix-recent-events .event-entry {
-  font-size: 12px;
+.fix-event-entry {
+  display: flex;
+  align-items: baseline;
   gap: 6px;
+  font-size: 11px;
+  font-weight: normal;
+  color: var(--text-muted);
+  border-left: 2px solid var(--border);
   padding-left: 8px;
-  border-left-width: 2px;
+  opacity: 0.8;
 }
+
+.fix-event-entry .event-time {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
+.fix-event-entry .event-icon {
+  opacity: 0.75;
+  filter: saturate(0.6);
+}
+
+.fix-event-entry .event-text {
+  color: var(--text-muted);
+}
+
+/* Same per-category hue as the panel, just muted via the opacity above
+   rather than a second, desaturated color per category. */
+.fix-event-entry.evt-goal { border-left-color: var(--tick-up); }
+.fix-event-entry.evt-yellow { border-left-color: var(--accent-amber); }
+.fix-event-entry.evt-red { border-left-color: var(--tick-down); }
+.fix-event-entry.evt-corner { border-left-color: var(--accent-blue); }
+.fix-event-entry.evt-var { border-left-color: var(--accent-violet); }
+.fix-event-entry.evt-penalty { border-left-color: var(--accent-purple); }
+.fix-event-entry.evt-shot,
+.fix-event-entry.evt-freekick,
+.fix-event-entry.evt-throwin { border-left-color: var(--accent-teal); }
+.fix-event-entry.evt-sub,
+.fix-event-entry.evt-kickoff,
+.fix-event-entry.evt-status,
+.fix-event-entry.evt-generic { border-left-color: var(--accent-grey); }
 
 .fix-events-link {
   margin-top: 6px;

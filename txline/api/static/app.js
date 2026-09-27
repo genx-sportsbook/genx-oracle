@@ -292,17 +292,18 @@ function formatPrices(prices, priceNames, directions) {
   }).join('')
 }
 
-const INLINE_EVENTS_LIMIT = 5
+const INLINE_EVENTS_LIMIT = 10
 
-// Compact inline preview of a fixture's most recent match events, shown
-// directly under the kickoff/competition line — a lighter-weight version of
+// Compact, muted inline preview of a fixture's most recent match events,
+// shown directly under the kickoff/competition line — a quieter version of
 // the same entries the "N match events" link opens in the full side panel
-// (see renderEventsPanel), just capped to the last 5 and with no timestamp.
+// (see renderEventsPanel), capped to the last 10 with a timestamp per entry.
 function recentEventsHtml(fid) {
   const entries = (scoreEvents.get(fid) || []).slice(0, INLINE_EVENTS_LIMIT)
   if (entries.length === 0) return ''
   const items = entries.map(e => `
-    <div class="event-entry ${esc(e.cls)}">
+    <div class="fix-event-entry ${esc(e.cls)}">
+      <span class="event-time">${esc(e.ts)}</span>
       <span class="event-icon">${e.icon}</span>
       <span class="event-text">${esc(e.text)}</span>
     </div>`).join('')
