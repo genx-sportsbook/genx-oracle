@@ -721,9 +721,12 @@ function render() {
           : ''
         const scoreHtml = fx.scoreText ? `<span class="fix-score">${esc(fx.scoreText)}</span>` : ''
         const statsHtml = statsRowHtml(fx.stats)
+        // Only shown while collapsed — once expanded, the inline preview
+        // (recentEventsHtml above) already shows the events themselves, so
+        // the link would be redundant.
         const eventCount = (scoreEvents.get(fid) || []).length
-        const eventsLinkHtml = eventCount
-          ? `<div class="fix-events-link" data-events-fid="${fid}">📋 Match Events</div>`
+        const eventsLinkHtml = (eventCount && !fx.expanded)
+          ? `<div class="fix-events-link" data-events-fid="${fid}">📋 ${eventCount} match event${eventCount === 1 ? '' : 's'}</div>`
           : ''
         html += `
           <td class="fix-name${isExpandable ? ' expandable' : ''}" rowspan="${displayItems.length}" data-fid="${fid}">
