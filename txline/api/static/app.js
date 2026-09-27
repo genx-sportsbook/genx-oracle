@@ -20,6 +20,13 @@ const MARKET_TYPE_NAMES = {
   '1X2_PARTICIPANT_RESULT': 'Match Odds',
   'ASIANHANDICAP_PARTICIPANT_GOALS': 'Asian Handicap',
   'OVERUNDER_PARTICIPANT_GOALS': 'Over/Under',
+  // American football (NFL) uses its own codes, confirmed 2026-09-27
+  // (Buccaneers vs Vikings) — without these, the generic suffix-stripping
+  // fallback below renders them as "Moneyline" (fine), "Eurohandicap" and
+  // "Overunder" (not fine).
+  'MONEYLINE_PARTICIPANT_RESULT': 'Moneyline',
+  'EUROHANDICAP_PARTICIPANT_POINTS': 'Handicap',
+  'OVERUNDER_PARTICIPANT_POINTS': 'Over/Under',
 }
 
 function prettifyMarketType(code) {
@@ -443,18 +450,20 @@ function ensureLine(fid, marketSig) {
   return lines.get(key)
 }
 
-// The default collapsed view for a fixture: full-match Match Odds if it's
+// The default collapsed view for a fixture: its "main line" market if it's
 // arrived yet, otherwise whichever line was updated most recently (HH:MM:SS
 // string comparison is fine here — all lines are stamped the same day).
 // Same SuperOddsType can exist as both a full-match line and a per-half line
 // (e.g. Match Odds vs. Match Odds 1st Half both report "1X2_PARTICIPANT_RESULT"
 // but differ by MarketPeriod), so the type code alone isn't enough — the
-// default must also require no period set.
+// default must also require no period set. Soccer's main line is Match Odds;
+// American football's is Moneyline — same role, different vendor code.
 const MATCH_ODDS_TYPE = '1X2_PARTICIPANT_RESULT'
+const PRIMARY_MARKET_TYPES = new Set([MATCH_ODDS_TYPE, 'MONEYLINE_PARTICIPANT_RESULT'])
 
 function pickDefaultLine(groupLines) {
-  const matchOdds = groupLines.find(l => l.superOddsType === MATCH_ODDS_TYPE && !l.marketPeriod)
-  if (matchOdds) return matchOdds
+  const mainLine = groupLines.find(l => PRIMARY_MARKET_TYPES.has(l.superOddsType) && !l.marketPeriod)
+  if (mainLine) return mainLine
   return groupLines.reduce((latest, l) => (!latest || l.updated > latest.updated) ? l : latest, null)
 }
 
@@ -478,10 +487,13 @@ function marketGroupKey(fid, superOddsType) {
   return `${fid}::${superOddsType}`
 }
 
-// Expanded-fixture market order: Match Odds first, then Asian Handicap, then
-// Over/Under, then anything unrecognized (in first-seen order). Types not
-// listed here rank after all of these rather than being interleaved.
-const MARKET_TYPE_ORDER = [MATCH_ODDS_TYPE, 'ASIANHANDICAP_PARTICIPANT_GOALS', 'OVERUNDER_PARTICIPANT_GOALS']
+// Expanded-fixture market order: Match Odds/Moneyline first, then handicap,
+// then Over/Under, then anything unrecognized (in first-seen order). Types
+// not listed here rank after all of these rather than being interleaved.
+const MARKET_TYPE_ORDER = [
+  MATCH_ODDS_TYPE, 'ASIANHANDICAP_PARTICIPANT_GOALS', 'OVERUNDER_PARTICIPANT_GOALS',
+  'MONEYLINE_PARTICIPANT_RESULT', 'EUROHANDICAP_PARTICIPANT_POINTS', 'OVERUNDER_PARTICIPANT_POINTS',
+]
 
 function marketTypeRank(superOddsType) {
   const idx = MARKET_TYPE_ORDER.indexOf(superOddsType)
@@ -504,6 +516,14 @@ function lineParamValue(line) {
 function compareLines(a, b) {
   const typeDiff = marketTypeRank(a.superOddsType) - marketTypeRank(b.superOddsType)
   if (typeDiff !== 0) return typeDiff
+  // Every type MARKET_TYPE_ORDER doesn't know about shares that same
+  // fallback rank, so on sports like NFL where none of the observed codes
+  // are in the list, two *different* unrecognized types (e.g. a handicap
+  // line and an over/under line) would otherwise tie here and fall through
+  // to the numeric-line comparison below, interleaving them by line value
+  // instead of grouping same-type lines together. Group by the raw type
+  // string first so that can't happen.
+  if (a.superOddsType !== b.superOddsType) return a.superOddsType.localeCompare(b.superOddsType)
   const va = lineParamValue(a)
   const vb = lineParamValue(b)
   if (va != null && vb != null && va !== vb) return va - vb
