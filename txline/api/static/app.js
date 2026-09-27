@@ -709,8 +709,11 @@ function render() {
       const isFirst = i === 0
       html += `<tr class="${line.key === lastFlashKey ? 'flash' : ''}${isFirst ? ' group-start' : ''}">`
       if (isFirst) {
-        const expandHint = isExpandable
-          ? `<div class="fix-expand">${fx.expanded ? '▲ Hide markets' : `▼ ${marketTypeCount} market type${marketTypeCount === 1 ? '' : 's'}`}</div>`
+        // Only hinted while collapsed — the whole name cell is already
+        // clickable to toggle either way (see the tbody click handler), so
+        // once expanded there's nothing this label needs to say.
+        const expandHint = (isExpandable && !fx.expanded)
+          ? `<div class="fix-expand">▼ ${marketTypeCount} market type${marketTypeCount === 1 ? '' : 's'}</div>`
           : ''
         const stateShort = fx.stateCode != null ? gameStateShort(fx.stateCode) : null
         const stateHtml = stateShort
@@ -720,7 +723,7 @@ function render() {
         const statsHtml = statsRowHtml(fx.stats)
         const eventCount = (scoreEvents.get(fid) || []).length
         const eventsLinkHtml = eventCount
-          ? `<div class="fix-events-link" data-events-fid="${fid}">📋 ${eventCount} match event${eventCount === 1 ? '' : 's'}</div>`
+          ? `<div class="fix-events-link" data-events-fid="${fid}">📋 Match Events</div>`
           : ''
         html += `
           <td class="fix-name${isExpandable ? ' expandable' : ''}" rowspan="${displayItems.length}" data-fid="${fid}">
