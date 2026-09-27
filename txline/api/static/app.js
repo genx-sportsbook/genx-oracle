@@ -292,6 +292,23 @@ function formatPrices(prices, priceNames, directions) {
   }).join('')
 }
 
+const INLINE_EVENTS_LIMIT = 5
+
+// Compact inline preview of a fixture's most recent match events, shown
+// directly under the kickoff/competition line — a lighter-weight version of
+// the same entries the "N match events" link opens in the full side panel
+// (see renderEventsPanel), just capped to the last 5 and with no timestamp.
+function recentEventsHtml(fid) {
+  const entries = (scoreEvents.get(fid) || []).slice(0, INLINE_EVENTS_LIMIT)
+  if (entries.length === 0) return ''
+  const items = entries.map(e => `
+    <div class="event-entry ${esc(e.cls)}">
+      <span class="event-icon">${e.icon}</span>
+      <span class="event-text">${esc(e.text)}</span>
+    </div>`).join('')
+  return `<div class="fix-recent-events">${items}</div>`
+}
+
 // Renders the 🟨/🟥/🚩 mini-stats row under a fixture's name from a
 // scoreBreakdown() result. Only shown once at least one of the three has a
 // nonzero count on either side, so a scoreless/card-free match stays clean.
@@ -688,6 +705,7 @@ function render() {
           <td class="fix-name${isExpandable ? ' expandable' : ''}" rowspan="${displayItems.length}" data-fid="${fid}">
             <div class="fix-title">${isRecentlyUpdated(fx) ? '<span class="recent-dot" title="Updated in the last 30s"></span>' : ''}${stateHtml}${esc(fx.name)}${scoreHtml}</div>
             <div class="fix-sub">${esc(fx.kickoff)} · ${fx.competition && fx.competition !== '—' ? `<span class="competition-link" data-competition="${esc(fx.competition)}">${esc(fx.competition)}</span>` : esc(fx.competition)}</div>
+            ${recentEventsHtml(fid)}
             ${statsHtml}
             ${eventsLinkHtml}
             <div class="fix-updated">${fx.updated ? `Updated ${esc(fx.updated)} · ${fx.updateCount} update${fx.updateCount === 1 ? '' : 's'}` : ''}</div>

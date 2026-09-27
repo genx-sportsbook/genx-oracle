@@ -384,6 +384,23 @@ td.fix-name {
   --part-bg: rgba(59, 130, 246, 0.12);
 }
 
+/* Inline preview under the kickoff/competition line — same entries and
+   color-coding as the full match-events panel (.event-entry, below), just
+   sized down to fit inline and with no timestamp. */
+.fix-recent-events {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 6px;
+}
+
+.fix-recent-events .event-entry {
+  font-size: 12px;
+  gap: 6px;
+  padding-left: 8px;
+  border-left-width: 2px;
+}
+
 .fix-events-link {
   margin-top: 6px;
   font-size: 13px;
