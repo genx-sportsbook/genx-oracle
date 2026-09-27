@@ -6,12 +6,14 @@ Field names and enum values below come from TxODDS' "Scores Product API
 documentation, Soccer v1.1" PDF (the authoritative spec for this — it isn't
 covered by the public txline-docs site at all). TxLINE's own SSE payloads
 flatten that PDF's nested Fusion format (`FixtureInfo`/`Update`) into the
-single flat object modeled by `ScoreUpdate`, lowercasing the leading letter
-of each top-level field (e.g. the PDF's `StatusId` matches `ScoreUpdate.gameState`
-1:1 in value). The nested objects (`score`, `scoreSoccer`, `data`) haven't been
-observed on a live event yet — no ticketed fixture was in-running while this
-was built — so their exact key casing is unconfirmed; `_pick()` below tries
-every casing variant defensively instead of assuming one.
+single flat object modeled by `ScoreUpdate` — as plain PascalCase, same as
+OddsUpdate (e.g. the PDF's `StatusId` matches `ScoreUpdate.gameState` 1:1 in
+value); `txline/models.py` aliases each PascalCase wire key to this module's
+pre-existing camelCase attribute names. The nested objects (`score`,
+`scoreSoccer`, `data`) haven't been observed on a live event yet — no goal or
+card was ticketed while this was built — so their exact key casing is still
+unconfirmed; `_pick()` below tries every casing variant defensively instead
+of assuming one.
 """
 
 import re

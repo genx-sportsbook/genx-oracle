@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional
 
 
@@ -34,28 +34,39 @@ class OddsUpdate(BaseModel):
 
 
 class ScoreUpdate(BaseModel):
-    fixtureId: int
-    gameState: str
-    startTime: int
-    participant1Id: int
-    participant2Id: int
-    competitionId: int
-    countryId: int
-    sportId: int
-    fixtureGroupId: int
-    isTeam: bool
-    participant1IsHome: bool
-    action: str
-    id: str
-    ts: int
-    connectionId: str
-    seq: int
-    score: Optional[dict] = None
-    scoreSoccer: Optional[dict] = None
-    scoreBasketball: Optional[dict] = None
-    data: Optional[dict] = None
-    dataSoccer: Optional[dict] = None
-    dataBasketball: Optional[dict] = None
+    """
+    Wire field names are PascalCase, same as OddsUpdate — confirmed against
+    live events on 2026-09-27. The aliases below map each to this model's
+    existing camelCase attribute names (kept as-is so soccer.py, cli/watch.py,
+    api/server.py, and the frontend's JSON contract don't need to change);
+    `populate_by_name` lets tests keep constructing instances by attribute
+    name directly.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    fixtureId: int = Field(alias="FixtureId")
+    gameState: str = Field(alias="GameState")
+    startTime: int = Field(alias="StartTime")
+    participant1Id: int = Field(alias="Participant1Id")
+    participant2Id: int = Field(alias="Participant2Id")
+    competitionId: int = Field(alias="CompetitionId")
+    countryId: int = Field(alias="CountryId")
+    sportId: int = Field(alias="SportId")
+    fixtureGroupId: int = Field(alias="FixtureGroupId")
+    isTeam: bool = Field(alias="IsTeam")
+    participant1IsHome: bool = Field(alias="Participant1IsHome")
+    action: str = Field(alias="Action")
+    id: int = Field(alias="Id")
+    ts: int = Field(alias="Ts")
+    connectionId: int = Field(alias="ConnectionId")
+    seq: int = Field(alias="Seq")
+    score: Optional[dict] = Field(default=None, alias="Score")
+    scoreSoccer: Optional[dict] = Field(default=None, alias="ScoreSoccer")
+    scoreBasketball: Optional[dict] = Field(default=None, alias="ScoreBasketball")
+    data: Optional[dict] = Field(default=None, alias="Data")
+    dataSoccer: Optional[dict] = Field(default=None, alias="DataSoccer")
+    dataBasketball: Optional[dict] = Field(default=None, alias="DataBasketball")
 
 
 class Heartbeat(BaseModel):

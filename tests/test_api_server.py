@@ -96,8 +96,8 @@ async def test_scores_stream_sse_format(app):
             participant1Id=1, participant2Id=2, competitionId=1,
             countryId=1, sportId=1, fixtureGroupId=1,
             isTeam=True, participant1IsHome=True,
-            action="goal", id="s1", ts=1000,
-            connectionId="conn1", seq=1,
+            action="goal", id=1, ts=1000,
+            connectionId=1, seq=1,
         )
         yield Heartbeat(Ts=3000)
 

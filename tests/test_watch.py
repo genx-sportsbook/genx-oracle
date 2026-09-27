@@ -8,7 +8,7 @@ def _score_update(**kwargs) -> ScoreUpdate:
         fixtureId=1, gameState="FirstHalf", startTime=0, participant1Id=10,
         participant2Id=20, competitionId=5, countryId=1, sportId=1,
         fixtureGroupId=1, isTeam=True, participant1IsHome=True,
-        action="Goal", id="abc", ts=0, connectionId="x", seq=1,
+        action="Goal", id=1, ts=0, connectionId=1, seq=1,
     )
     return ScoreUpdate(**{**defaults, **kwargs})
 
