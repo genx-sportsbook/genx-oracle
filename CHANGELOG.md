@@ -2,6 +2,27 @@
 
 All notable changes to this project are documented here.
 
+## [1.0.9] - 2026-09-28
+
+### Added
+
+- Expanding a fixture now shows its last 10 match events (icon, description,
+  timestamp) inline under the kickoff/competition line, styled subtly so it
+  reads as ambient detail rather than competing with the fixture name/score.
+
+### Fixed
+
+- NFL (and other non-soccer) fixtures' markets weren't grouping correctly —
+  none of the American-football market codes (`MONEYLINE_PARTICIPANT_RESULT`,
+  `EUROHANDICAP_PARTICIPANT_POINTS`, `OVERUNDER_PARTICIPANT_POINTS`) were
+  recognized, so they tied at the same sort rank and fell through to a
+  comparison with no type awareness at all. Added proper names/ordering for
+  them and a type-string tie-break so same-type lines always sort together.
+- Dropped the "Hide markets" label (redundant — the whole fixture name is
+  already clickable to toggle) and the "N match events" link/count once a
+  fixture is expanded (redundant next to the new inline preview above); the
+  count stays on collapsed fixtures, where it's the only summary shown.
+
 ## [1.0.8] - 2026-09-27
 
 ### Fixed
