@@ -6,7 +6,7 @@ from typing import Optional
 
 import httpx
 
-from txline.auth import load_credentials, save_credentials
+from txline.auth import load_credentials
 from txline.models import Fixture, OddsUpdate, ScoreUpdate, Heartbeat, TokenCredentials
 from txline.rest.fixtures import get_fixtures, get_fixtures_window
 from txline.streams.odds import stream_odds

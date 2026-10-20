@@ -1,12 +1,10 @@
 """CLI: txline-stream — tail live odds or scores to stdout."""
 
 import asyncio
-import json
 from pathlib import Path
 
 import click
 from rich.console import Console
-from rich.live import Live
 from rich.table import Table
 
 from txline.client import TxLineClient
