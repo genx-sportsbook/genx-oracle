@@ -2,6 +2,35 @@
 
 All notable changes to this project are documented here.
 
+## [1.1.0] - 2026-11-02
+
+### Fixed
+
+- **Pod kept going not-ready in Kubernetes.** The readiness probe pointed at
+  `/fixtures` with `timeoutSeconds: 10`, but that endpoint fetches and parses
+  two day-buckets of the global fixture catalog — ~68MB, ~230k records,
+  measured at ~9s cold and ~3.2s warm. The probe was failing on its own cost,
+  with no load involved. All probes now target a new process-local `/healthz`,
+  and a `startupProbe` covers slow starts.
+- Concurrent requests arriving on a cold cache each started their own full
+  68MB fetch: the single-flight check ran *before* the lock was acquired, which
+  serialized the callers without deduplicating them.
+- A failed fixture refresh no longer errors the endpoint — the previous copy is
+  served instead, so an upstream blip can't take the dashboard down.
+
+### Changed
+
+- `/fixtures` responses are cached as serialized bytes rather than Pydantic
+  models, and refreshed by a background task every 240s instead of inline on a
+  request. FastAPI was re-encoding ~116k models on every call, ~3.2s of
+  synchronous CPU that also stalled the SSE streams sharing the event loop.
+  A cache hit is now ~1ms, and startup no longer blocks on the fetch.
+- `/fixtures` is trimmed to the five fields the dashboard actually reads
+  (`FixtureId`, `Participant1`, `Participant2`, `Competition`, `StartTime`),
+  halving the payload from 34MB to 16MB.
+- The Helm chart now sets `resources` (512Mi request, 1Gi limit). A refresh
+  peaks near 600MB RSS, so a tighter limit OOM-kills the pod mid-refresh.
+
 ## [1.0.9] - 2026-09-28
 
 ### Added
