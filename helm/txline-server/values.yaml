@@ -9,6 +9,17 @@ image:
   tag: ""
   pullPolicy: IfNotPresent
 
+# A fixture-catalog refresh transiently parses ~68MB of JSON into ~230k
+# Pydantic models, peaking around 600MB RSS. With no request set the pod can
+# land on a node with nothing left to give it; with a limit below that peak
+# it gets OOM-killed mid-refresh and restarts. Size the limit above the peak.
+resources:
+  requests:
+    cpu: 200m
+    memory: 512Mi
+  limits:
+    memory: 1Gi
+
 service:
   type: ClusterIP
   port: 8000

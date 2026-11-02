@@ -28,18 +28,33 @@ spec:
             - name: credentials
               mountPath: /app/credentials
               readOnly: true
-          livenessProbe:
-            tcpSocket:
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          # All three probes hit /healthz, which is process-local and does no
+          # upstream work. They used to point at /fixtures, which fetches and
+          # parses ~68MB of the global fixture catalog — measured at ~9s cold,
+          # well past the old timeoutSeconds: 10 — so the probe itself was what
+          # flapped the pod out of the endpoints list.
+          startupProbe:
+            httpGet:
+              path: /healthz
               port: 8000
-            initialDelaySeconds: 10
+            periodSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
             periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /fixtures
+              path: /healthz
               port: 8000
-            initialDelaySeconds: 15
-            periodSeconds: 30
-            timeoutSeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
       volumes:
         - name: credentials
           secret:

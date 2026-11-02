@@ -52,7 +52,19 @@ The credential lifecycle is:
 
 **`txline-watch`** (`txline/cli/watch.py`) fans odds and scores SSE streams into an `asyncio.Queue`, applies events to a `dict[int, FixtureState]` via `apply_event`, and renders a `Rich.Live` table via `build_table`. Fixture names are resolved lazily from a one-shot REST snapshot fetch. Prices are stored as integers and displayed as decimal odds (÷ 1000).
 
-**`txline-server`** (`txline/api/server.py`) is a FastAPI app that proxies the three TxLINE endpoints (`GET /fixtures`, `GET /odds/stream`, `GET /scores/stream`) and serves a vanilla JS browser dashboard at `/`. Static files live in `txline/api/static/` (`index.html`, `app.js`, `style.css`), mounted via `StaticFiles`; a `no_cache` middleware forces `Cache-Control: no-store` on every response so edits to `app.js`/`style.css` are always picked up without a hard refresh (`StaticFiles` alone only sends `Last-Modified`/`ETag`, which Chrome/Safari can serve stale from heuristic cache). CORS is open (`allow_origins=["*"]`).
+**`txline-server`** (`txline/api/server.py`) is a FastAPI app that proxies the three TxLINE endpoints (`GET /fixtures`, `GET /odds/stream`, `GET /scores/stream`), exposes `GET /healthz`, and serves a vanilla JS browser dashboard at `/`.
+
+`/fixtures` is the expensive one: `get_fixtures_window` pulls two day-buckets of the *global* fixture catalog (~34MB each, ~230k records), which measures ~5s on the wire plus ~2s of Pydantic validation and peaks around 600MB RSS. Three things keep that off the request path:
+
+- **`FixturesCache` caches the serialized bytes, not the models.** FastAPI re-encoding ~116k `Fixture` models cost ~3.2s of synchronous CPU on *every* call — which on single-worker uvicorn also stalls the SSE streams sharing that event loop. Encoding once per refresh makes a cache hit ~1ms.
+- **A background task refreshes every 240s** (ahead of the 300s TTL) so no browser request ever blocks on a cold fetch. It is deliberately *not* awaited during startup — the app must bind and serve immediately. A stale body is served as-is rather than refetched inline, and a failed refresh keeps the previous copy instead of erroring.
+- **The response is trimmed to the five fields the dashboard reads** (`FixtureId`, `Participant1`, `Participant2`, `Competition`, `StartTime` — see `resolveNameFromCache()` in `app.js`), halving it from 34MB to 16MB.
+
+The cold-start path is single-flight via a lock *re-checked inside the lock*; checking `self._body is None` only before acquiring it serializes the herd without deduplicating it, so every concurrent caller still ran its own 68MB fetch.
+
+**`/healthz`** is process-local and does no upstream work. This matters: all three Kubernetes probes point at it. The readiness probe used to target `/fixtures` with `timeoutSeconds: 10` against a ~9s cold response, so the probe itself was what flapped the pod out of the endpoints list — the pod went not-ready under no load at all. Never point a probe at `/fixtures`.
+
+Static files live in `txline/api/static/` (`index.html`, `app.js`, `style.css`), mounted via `StaticFiles`; a `no_cache` middleware forces `Cache-Control: no-store` on every response so edits to `app.js`/`style.css` are always picked up without a hard refresh (`StaticFiles` alone only sends `Last-Modified`/`ETag`, which Chrome/Safari can serve stale from heuristic cache). CORS is open (`allow_origins=["*"]`).
 
 The browser dashboard ("GENX-SPORTSBOOK" in the topbar — styled to match the genx-sportsbook.com logo, `Black Ops One` font with a cyan/pink split, name only) fetches `/fixtures` on load for name/competition resolution, then opens two `EventSource` connections and updates a live table, one row-group per fixture:
 
@@ -105,6 +117,10 @@ Earlier versions of this workflow also pushed `:latest` on every run, including 
 ## Kubernetes / Helm
 
 The Helm chart lives at `helm/txline-server/`. Credentials are injected as a Kubernetes Secret. `image.tag` defaults to the chart's `appVersion`, so the examples below only pass it to pin something different from the chart being installed.
+
+`resources` defaults to a 512Mi request / 1Gi limit. Don't lower the limit below ~700Mi: a fixture refresh transiently holds ~68MB of JSON and ~230k Pydantic models, peaking near 600MB, and a limit under that peak OOM-kills the pod mid-refresh in a restart loop.
+
+Probes use a `startupProbe` (3s period, 20 failures = up to 60s to come up) to cover slow starts, with liveness and readiness both on `/healthz`.
 
 Two ways to supply credentials:
 

@@ -1,3 +1,6 @@
+import asyncio
+
+import httpx
 import pytest
 from httpx import AsyncClient, ASGITransport
 from unittest.mock import patch, AsyncMock
@@ -147,3 +150,77 @@ def test_cli_exits_on_missing_credentials(tmp_path):
     result = runner.invoke(cli, ["--credentials", str(tmp_path / "nope.json")])
     assert result.exit_code != 0
     assert "No credentials" in result.output
+
+
+async def test_healthz_does_no_upstream_work(app):
+    """The probe target must never touch TxLINE — that's what made the old
+    readiness probe (pointed at /fixtures) time out and flap the pod."""
+    called = False
+
+    async def mock_get_fixtures(*args, **kwargs):
+        nonlocal called
+        called = True
+        return []
+
+    with patch("txline.api.server.get_fixtures_window", new=mock_get_fixtures):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            r = await c.get("/healthz")
+
+    assert r.status_code == 200
+    assert r.json()["status"] == "ok"
+    assert called is False
+
+
+async def test_fixtures_trimmed_to_fields_the_dashboard_uses(app):
+    with patch("txline.api.server.get_fixtures_window", new=AsyncMock(return_value=[FIXTURE_1])):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            r = await c.get("/fixtures")
+
+    assert set(r.json()[0]) == {
+        "FixtureId", "Participant1", "Participant2", "Competition", "StartTime",
+    }
+
+
+async def test_fixtures_fetched_once_and_served_from_cache(app):
+    calls = 0
+
+    async def mock_get_fixtures(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return [FIXTURE_1]
+
+    with patch("txline.api.server.get_fixtures_window", new=mock_get_fixtures):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            first = await c.get("/fixtures")
+            second = await c.get("/fixtures")
+
+    assert calls == 1
+    assert first.content == second.content
+
+
+async def test_concurrent_cold_requests_fetch_once(app):
+    """Single-flight: without the lock each concurrent caller would start its
+    own ~68MB fetch and ~600MB-peak parse."""
+    calls = 0
+
+    async def mock_get_fixtures(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.05)
+        return [FIXTURE_1]
+
+    with patch("txline.api.server.get_fixtures_window", new=mock_get_fixtures):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            results = await asyncio.gather(*[c.get("/fixtures") for _ in range(5)])
+
+    assert calls == 1
+    assert all(r.status_code == 200 for r in results)
+
+
+async def test_fixtures_returns_503_when_upstream_fails_with_empty_cache(app):
+    with patch("txline.api.server.get_fixtures_window",
+               new=AsyncMock(side_effect=httpx.HTTPError("boom"))):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            r = await c.get("/fixtures")
+
+    assert r.status_code == 503
