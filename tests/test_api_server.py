@@ -20,8 +20,8 @@ def app(creds):
 
 
 FIXTURE_1 = Fixture(
-    Ts=1000, StartTime=1781830800000, Competition="England - Premier League",
-    CompetitionId=1, FixtureGroupId=1, Participant1Id=1,
+    Ts=1000, StartTime=1781830800000, Competition="Premier League",
+    CompetitionId=8, FixtureGroupId=1, Participant1Id=1,
     Participant1="Mexico", Participant2Id=2, Participant2="South Korea",
     FixtureId=17588223, Participant1IsHome=True,
 )
@@ -35,7 +35,7 @@ async def test_fixtures_returns_list(app):
     data = r.json()
     assert len(data) == 1
     assert data[0]["FixtureId"] == 17588223
-    assert data[0]["Competition"] == "England - Premier League"
+    assert data[0]["Competition"] == "Premier League"
 
 
 async def test_fixtures_passes_credentials(app):
@@ -45,6 +45,7 @@ async def test_fixtures_passes_credentials(app):
         captured["jwt"] = jwt
         captured["api_token"] = api_token
         captured["days_after"] = kwargs["days_after"]
+        captured["competition_id"] = kwargs["competition_id"]
         return []
 
     with patch("txline.api.server.get_fixtures_window", new=mock_get_fixtures):
@@ -54,27 +55,22 @@ async def test_fixtures_passes_credentials(app):
     assert captured["jwt"] == "test-jwt"
     assert captured["api_token"] == "test-token"
     assert captured["days_after"] == 3
+    assert captured["competition_id"] == 8
 
 
 async def test_fixtures_only_return_english_premier_league(app):
     fixtures = [
         FIXTURE_1,
-        FIXTURE_1.model_copy(update={"FixtureId": 2, "Competition": "International Friendlies"}),
-        FIXTURE_1.model_copy(update={"FixtureId": 3, "Competition": "Russian Premier League"}),
-        FIXTURE_1.model_copy(update={"FixtureId": 4, "Competition": "NBA"}),
-        FIXTURE_1.model_copy(update={"FixtureId": 5, "Competition": "World Cup"}),
-        FIXTURE_1.model_copy(update={"FixtureId": 6, "Competition": "Friendlies"}),
-        FIXTURE_1.model_copy(update={"FixtureId": 7, "Competition": "Premier League"}),
-        FIXTURE_1.model_copy(update={"FixtureId": 8, "Competition": "Premier League 2"}),
+        FIXTURE_1.model_copy(update={"FixtureId": 2, "CompetitionId": 121}),
+        FIXTURE_1.model_copy(update={"FixtureId": 3, "CompetitionId": 113}),
+        FIXTURE_1.model_copy(update={"FixtureId": 4, "CompetitionId": 100, "Competition": "NFL"}),
+        FIXTURE_1.model_copy(update={"FixtureId": 5, "CompetitionId": 101, "Competition": "NCAA"}),
     ]
-    async def fetch_window(client, jwt, api_token, *, days_after, include_competition):
-        return [f for f in fixtures if include_competition(f.Competition)]
-
-    with patch("txline.api.server.get_fixtures_window", new=fetch_window):
+    with patch("txline.api.server.get_fixtures_window", return_value=fixtures):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             response = await c.get("/fixtures")
 
-    assert [fixture["FixtureId"] for fixture in response.json()] == [FIXTURE_1.FixtureId, 7]
+    assert [fixture["FixtureId"] for fixture in response.json()] == [FIXTURE_1.FixtureId]
 
 
 async def test_odds_stream_sse_format(app):
@@ -217,7 +213,7 @@ async def test_fixtures_trimmed_to_fields_the_dashboard_uses(app):
             r = await c.get("/fixtures")
 
     assert set(r.json()[0]) == {
-        "FixtureId", "Participant1", "Participant2", "Competition", "StartTime",
+        "FixtureId", "Participant1", "Participant2", "Participant1IsHome", "Competition", "StartTime",
     }
 
 

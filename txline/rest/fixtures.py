@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -21,8 +20,6 @@ async def get_fixtures(
     api_token: str,
     start_epoch_day: Optional[int] = None,
     competition_id: Optional[int] = None,
-    *,
-    include_competition: Callable[[str], bool] | None = None,
 ) -> list[Fixture]:
     headers = {
         "Authorization": f"Bearer {jwt}",
@@ -36,10 +33,7 @@ async def get_fixtures(
 
     resp = await client.get(FIXTURES_URL, headers=headers, params=params)
     resp.raise_for_status()
-    return [
-        Fixture(**item) for item in resp.json()
-        if include_competition is None or include_competition(item.get("Competition", ""))
-    ]
+    return [Fixture(**item) for item in resp.json()]
 
 
 async def get_fixtures_window(
@@ -49,8 +43,6 @@ async def get_fixtures_window(
     competition_id: Optional[int] = None,
     days_before: int = 1,
     days_after: int = 0,
-    *,
-    include_competition: Callable[[str], bool] | None = None,
 ) -> list[Fixture]:
     """
     Merges /fixtures/snapshot across a small window of day-buckets.
@@ -74,7 +66,6 @@ async def get_fixtures_window(
         results = await asyncio.gather(*[
             get_fixtures(
                 client, jwt, api_token, start_epoch_day=day, competition_id=competition_id,
-                include_competition=include_competition,
             )
             for day in days[offset:offset + 2]
         ])

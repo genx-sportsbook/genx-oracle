@@ -36,26 +36,14 @@ FIXTURES_CACHE_TTL = 300  # seconds — how stale a cached body may get
 # cache and has to block on the upstream fetch itself.
 FIXTURES_REFRESH_INTERVAL = 240  # seconds
 
-# The dashboard only reads these five fields off each fixture (see
-# resolveNameFromCache() in static/app.js); the other eight are dead weight.
-# Trimming halves the response — 34MB -> 16MB — and, more importantly, cuts
-# the serialization from ~3.2s of event-loop-blocking work down to ~0.3s.
-FIXTURE_FIELDS = ("FixtureId", "Participant1", "Participant2", "Competition", "StartTime")
+# Send only the fields needed to display and sort fixtures.
+FIXTURE_FIELDS = (
+    "FixtureId", "Participant1", "Participant2", "Participant1IsHome", "Competition", "StartTime",
+)
 
 
 MATCH_ODDS_TYPE = "1X2_PARTICIPANT_RESULT"
-DASHBOARD_COMPETITIONS = frozenset({
-    "premier league",
-    "english premier league",
-    "england premier league",
-})
-
-
-def is_dashboard_fixture(competition: str) -> bool:
-    if not isinstance(competition, str):
-        return False
-    name = " ".join(competition.casefold().replace("-", " ").replace(":", " ").split())
-    return name in DASHBOARD_COMPETITIONS
+ENGLISH_PREMIER_LEAGUE_ID = 8  # TxLINE uses the name "Premier League" for several leagues.
 
 
 JWT_REFRESH_COOLDOWN = 30  # seconds
@@ -144,17 +132,18 @@ class FixturesCache:
         creds = self._auth.current
         try:
             fixtures = await get_fixtures_window(
-                self._http(), creds.jwt, creds.api_token, days_after=FIXTURES_DAYS_AHEAD,
-                include_competition=is_dashboard_fixture,
+                self._http(), creds.jwt, creds.api_token,
+                competition_id=ENGLISH_PREMIER_LEAGUE_ID, days_after=FIXTURES_DAYS_AHEAD,
             )
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code != 401 or not await self._auth.recover(creds):
                 raise
             creds = self._auth.current
             fixtures = await get_fixtures_window(
-                self._http(), creds.jwt, creds.api_token, days_after=FIXTURES_DAYS_AHEAD,
-                include_competition=is_dashboard_fixture,
+                self._http(), creds.jwt, creds.api_token,
+                competition_id=ENGLISH_PREMIER_LEAGUE_ID, days_after=FIXTURES_DAYS_AHEAD,
             )
+        fixtures = [f for f in fixtures if f.CompetitionId == ENGLISH_PREMIER_LEAGUE_ID]
         self._body = json.dumps(
             [{k: getattr(f, k) for k in FIXTURE_FIELDS} for f in fixtures],
             separators=(",", ":"),

@@ -70,8 +70,6 @@ function prettifyMarketPeriod(period) {
   return raw
 }
 
-// Structured form used by the boxed chip display: one box per component
-// (type / line / period) instead of a single flattened string.
 function marketParts(d) {
   return {
     type: prettifyMarketType(d.SuperOddsType),
@@ -80,25 +78,11 @@ function marketParts(d) {
   }
 }
 
-// Flat text form, kept for contexts that want a single plain string (e.g.
-// window title, alt text) rather than the boxed chip markup.
 function marketLabel(d) {
   const parts = [prettifyMarketType(d.SuperOddsType), ...prettifyMarketParams(d.MarketParameters)]
   const period = prettifyMarketPeriod(d.MarketPeriod)
   if (period) parts.push(period)
   return parts.join(' · ')
-}
-
-function formatMarketChip(parts) {
-  if (!parts || !parts.type) return '—'
-  const boxes = [`<span class="chip-market-part chip-market-type">${esc(parts.type)}</span>`]
-  for (const p of parts.params) {
-    boxes.push(`<span class="chip-market-part chip-market-param">${esc(p)}</span>`)
-  }
-  if (parts.period) {
-    boxes.push(`<span class="chip-market-part chip-market-period">${esc(parts.period)}</span>`)
-  }
-  return `<span class="chip-market-group">${boxes.join('')}</span>`
 }
 
 function marketSignature(d) {
@@ -356,14 +340,15 @@ let lastFlashKey = null
 let flashTimer = null
 let openLineKey = null    // market history panel — set when that panel is open
 let openEventsFid = null  // match-events panel — set when that panel is open
-let selectedCompetition = ''  // '' = no filter, show every competition
 let searchQuery = ''          // '' = no filter; lowercased substring matched against fixture name
 let totalUpdateCount = 0      // odds updates received across every fixture/market, for the whole session
-const competitionUpdateCounts = new Map()  // competition name -> odds updates received for that competition
 
-const tbody = document.getElementById('rows')
+const fixtureCards = document.getElementById('fixtureCards')
+let fixtureSnapshotLoaded = false
+let lastFixtureHtml = ''
+const FIXTURE_PAGE_SIZE = 9
+let fixtureDisplayLimit = FIXTURE_PAGE_SIZE
 const fixtureSearchInput = document.getElementById('fixtureSearch')
-const logoLink = document.getElementById('logoLink')
 const fixtureCountEl = document.getElementById('fixtureCount')
 const totalUpdatesEl = document.getElementById('totalUpdates')
 const lastUpdateEl = document.getElementById('lastUpdate')
@@ -429,8 +414,8 @@ function ensureLine(fid, marketSig) {
       superOddsType: null,    // raw SuperOddsType, used to pick the default line
       marketParameters: null, // raw MarketParameters ("line=-0.25"), used to sort lines numerically
       marketPeriod: null,     // raw MarketPeriod — same SuperOddsType can exist both for full match and per-half
-      market: '—',            // flat text form (marketLabel)
-      marketParts: null,      // boxed-chip form (marketParts) — { type, params, period }
+      market: '—',            // market label for the history drawer
+      marketParts: null,      // card labels — { type, params, period }
       pricesData: null,       // { prices, priceNames }
       priceDirs: null,        // array parallel to prices.prices — cleared/replaced on the line's next update, not on a timer
       lastPrices: null,
@@ -456,26 +441,6 @@ function pickDefaultLine(groupLines) {
   const mainLine = groupLines.find(l => PRIMARY_MARKET_TYPES.has(l.superOddsType) && !l.marketPeriod)
   if (mainLine) return mainLine
   return groupLines.reduce((latest, l) => (!latest || l.updated > latest.updated) ? l : latest, null)
-}
-
-// Within one market type (e.g. every Asian Handicap line for a fixture),
-// picks the representative variant shown when that type's group is
-// collapsed: the full-match variant if there is one, otherwise whichever
-// variant was updated most recently — same rule as pickDefaultLine, just
-// scoped to lines that already share a type.
-function pickDefaultVariant(typeLines) {
-  const noPeriod = typeLines.filter(l => !l.marketPeriod)
-  const pool = noPeriod.length ? noPeriod : typeLines
-  return pool.reduce((latest, l) => (!latest || l.updated > latest.updated) ? l : latest, null)
-}
-
-// Per-(fixture, market type) expand state for the variant tree — separate
-// from fx.expanded, which only controls whether the fixture shows one line
-// or all of them grouped by type.
-const expandedMarketGroups = new Set()
-
-function marketGroupKey(fid, superOddsType) {
-  return `${fid}::${superOddsType}`
 }
 
 // Expanded-fixture market order: Match Odds/Moneyline first, then handicap,
@@ -525,38 +490,6 @@ function compareLines(a, b) {
   return a.order - b.order
 }
 
-// Builds the row list for an expanded fixture: one row per market TYPE
-// (Match Odds, Asian Handicap, Over/Under, ...) showing its default variant,
-// with a "N variants" toggle in place of listing every line/period
-// combination flat. A type with only one variant just shows that line
-// directly, with no group toggle (nothing to expand). Expanding a group
-// (see expandedMarketGroups) swaps its single row for all of its variant
-// rows, in the same order compareLines already sorted them into.
-function buildExpandedDisplayList(fid, sortedLines) {
-  const result = []
-  let i = 0
-  while (i < sortedLines.length) {
-    const type = sortedLines[i].superOddsType
-    const variants = []
-    while (i < sortedLines.length && sortedLines[i].superOddsType === type) {
-      variants.push(sortedLines[i])
-      i++
-    }
-    if (variants.length === 1) {
-      result.push({ kind: 'single', line: variants[0] })
-      continue
-    }
-    if (expandedMarketGroups.has(marketGroupKey(fid, type))) {
-      variants.forEach((line, idx) => result.push({
-        kind: 'variant', line, groupType: type, count: variants.length, isFirstOfGroup: idx === 0,
-      }))
-    } else {
-      result.push({ kind: 'group', line: pickDefaultVariant(variants), groupType: type, count: variants.length })
-    }
-  }
-  return result
-}
-
 function computeDirections(line, prices) {
   if (!prices) return null
   if (!line.lastPrices || line.lastPrices.length !== prices.length) return null
@@ -585,19 +518,24 @@ function renderHistoryPanel() {
   if (openLineKey == null) return
   const line = lines.get(openLineKey)
   const fx = line ? fixtures.get(line.fixtureId) : null
-  historyTitle.innerHTML = line
-    ? `<div class="history-title-fixture">${esc(fx ? fx.name : String(line.fixtureId))}</div>
-       <div class="history-title-market">${formatMarketChip(line.marketParts)}</div>`
-    : esc(String(openLineKey))
+  const fixtureName = fx?.name || String(line?.fixtureId ?? openLineKey)
+  historyTitle.innerHTML = `
+    <p class="odds-history-label">Odds history</p>
+    <h2 class="history-title-fixture">${esc(fixtureName)}</h2>
+    ${line?.market && line.market !== '—' ? `<p class="history-title-market">${esc(line.market)}</p>` : ''}`
   const entries = history.get(openLineKey) || []
   historyList.innerHTML = entries.length === 0
-    ? `<p class="history-empty">No odds updates yet for this market.</p>`
-    : entries.map(e => `
-        <div class="history-entry">
-          <span class="h-time">${esc(e.ts)}</span>
-          <div class="h-prices">${formatPrices(e.prices, e.priceNames, null, line?.fixtureId)}</div>
-        </div>
-      `).join('')
+    ? '<p class="fixture-empty">No odds updates yet for this market.</p>'
+    : `<ol class="odds-history-cards">${entries.map((entry, index) => `
+        <li class="odds-history-card${index === 0 ? ' odds-history-card-latest' : ''}">
+          <div class="odds-history-card-header">
+            <time>${esc(entry.ts)}</time>
+            ${index === 0 ? '<span>Latest update</span>' : ''}
+          </div>
+          ${entry.prices?.length
+            ? `<div class="fixture-prices">${formatPrices(entry.prices, entry.priceNames, null, line?.fixtureId)}</div>`
+            : '<p class="odds-waiting">No prices in this update</p>'}
+        </li>`).join('')}</ol>`
 }
 
 function openMarketPanel(key) {
@@ -662,10 +600,17 @@ function flash(key) {
 // --- Render ---
 
 const UPCOMING_WINDOW_MS = 3 * 24 * 60 * 60 * 1000
+const homeTeamOrder = new Intl.Collator('en', { sensitivity: 'base' })
+
+function homeTeamName(fid) {
+  const fixture = fixturesCache.get(fid)
+  return (fixture?.Participant1IsHome === false ? fixture.Participant2 : fixture?.Participant1) || ''
+}
 
 function render() {
   const now = Date.now()
   const groups = new Map()
+  const fixturesWithOdds = new Set()
   for (const [fid, fix] of fixturesCache) {
     if (fix.StartTime >= now && fix.StartTime < now + UPCOMING_WINDOW_MS) {
       groups.set(fid, [])
@@ -676,98 +621,112 @@ function render() {
     if (kickoff != null && kickoff >= now + UPCOMING_WINDOW_MS) continue
     if (!groups.has(line.fixtureId)) groups.set(line.fixtureId, [])
     groups.get(line.fixtureId).push(line)
+    if (line.pricesData?.prices?.length) fixturesWithOdds.add(line.fixtureId)
   }
   for (const fid of groups.keys()) {
     const fx = fixtures.get(fid)
-    if ((selectedCompetition && fx?.competition !== selectedCompetition)
-        || (searchQuery && !fx?.name.toLowerCase().includes(searchQuery))) {
+    if (searchQuery && !fx?.name.toLowerCase().includes(searchQuery)) {
       groups.delete(fid)
     }
   }
-  // Soonest kickoff first; fixtures whose kickoff hasn't resolved yet (name
-  // lookup still pending) sort to the bottom rather than jumbling in at "0".
+  // Sort each odds group by kickoff, then alphabetically by home team.
   const fixtureIds = [...groups.keys()].sort((a, b) => {
-    const tsA = fixtures.get(a)?.kickoffTs
-    const tsB = fixtures.get(b)?.kickoffTs
-    if (tsA == null && tsB == null) return a - b
-    if (tsA == null) return 1
-    if (tsB == null) return -1
-    return tsA - tsB
+    const oddsOrder = Number(fixturesWithOdds.has(b)) - Number(fixturesWithOdds.has(a))
+    if (oddsOrder !== 0) return oddsOrder
+    const tsA = fixtures.get(a)?.kickoffTs ?? Infinity
+    const tsB = fixtures.get(b)?.kickoffTs ?? Infinity
+    if (tsA !== tsB) return tsA - tsB
+    return homeTeamOrder.compare(homeTeamName(a), homeTeamName(b)) || a - b
   })
 
-  let html = ''
-  for (const fid of fixtureIds) {
-    const fx = fixtures.get(fid) || { name: String(fid), competition: '—', kickoff: '—', kickoffTs: null, updated: '', updatedAtMs: null, updateCount: 0, expanded: false }
+  const visibleFixtureIds = fixtureIds.slice(0, fixtureDisplayLimit)
+  const pricedCards = []
+  const waitingCards = []
+  for (const fid of visibleFixtureIds) {
+    const fx = fixtures.get(fid) || { name: String(fid), competition: '—', kickoff: '—' }
     const groupLines = groups.get(fid).sort(compareLines)
     const isExpandable = groupLines.length > 1
-    const displayItems = fx.expanded && isExpandable
-      ? buildExpandedDisplayList(fid, groupLines)
-      : [{ kind: 'single', line: pickDefaultLine(groupLines) }]
+    const expanded = Boolean(fx.expanded && isExpandable)
+    const hasOdds = fixturesWithOdds.has(fid)
+    const pricedLines = hasOdds ? groupLines.filter(line => line.pricesData?.prices?.length) : groupLines
+    const displayLines = expanded ? groupLines : [pickDefaultLine(pricedLines)]
 
-    displayItems.forEach((item, i) => {
-      const line = item.line
-      const isFirst = i === 0
-      html += `<tr class="${line?.key === lastFlashKey ? 'flash' : ''}${isFirst ? ' group-start' : ''}">`
-      if (isFirst) {
-        // Only hinted while collapsed — the whole name cell is already
-        // clickable to toggle either way (see the tbody click handler), so
-        // once expanded there's nothing this label needs to say.
-        const expandHint = (isExpandable && !fx.expanded)
-          ? `<div class="fix-expand">▼ ${groupLines.length} odds variants</div>`
-          : ''
-        const stateShort = fx.stateCode != null ? gameStateShort(fx.stateCode) : null
-        const stateHtml = stateShort
-          ? `<span class="state-badge${fx.isLive ? ' state-live' : ''}" title="${esc(fx.stateLabel || stateShort)}">${fx.isLive ? '<span class="state-dot"></span>' : ''}${esc(stateShort)}</span>`
-          : ''
-        const scoreHtml = fx.scoreText ? `<span class="fix-score">${esc(fx.scoreText)}</span>` : ''
-        const statsHtml = statsRowHtml(fx.stats)
-        // Only shown while collapsed — once expanded, the inline preview
-        // (recentEventsHtml above) already shows the events themselves, so
-        // the link would be redundant.
-        const eventCount = (scoreEvents.get(fid) || []).length
-        const eventsLinkHtml = (eventCount && !fx.expanded)
-          ? `<div class="fix-events-link" data-events-fid="${fid}">📋 ${eventCount} match event${eventCount === 1 ? '' : 's'}</div>`
-          : ''
-        html += `
-          <td class="fix-name${isExpandable ? ' expandable' : ''}" rowspan="${displayItems.length}" data-fid="${fid}">
-            <div class="fix-title">${isRecentlyUpdated(fx) ? '<span class="recent-dot" title="Updated in the last 30s"></span>' : ''}${stateHtml}${esc(fx.name)}${scoreHtml}</div>
-            <div class="fix-sub">${esc(fx.kickoff)} · ${fx.competition && fx.competition !== '—' ? `<button type="button" class="competition-link" aria-pressed="${fx.competition === selectedCompetition}" data-competition="${esc(fx.competition)}">${esc(fx.competition)}</button>` : esc(fx.competition)}</div>
-            ${fx.expanded ? recentEventsHtml(fid) : ''}
-            ${statsHtml}
-            ${eventsLinkHtml}
-            <div class="fix-updated">${fx.updated ? `Updated ${esc(fx.updated)} · ${fx.updateCount} update${fx.updateCount === 1 ? '' : 's'}` : ''}</div>
-            ${expandHint}
-          </td>`
-      }
-      if (!line) {
-        html += '<td class="prices odds-waiting">Waiting for odds</td></tr>'
-        return
-      }
-      // A market-type group collapses to its default variant with a "N
-      // variants" toggle; expanding it swaps that one row for all of its
-      // variant rows (marked .market-variant for the tree-guide styling),
-      // with the toggle moving to "Hide variants" on the first of them.
-      const groupToggleHtml = item.kind === 'group'
-        ? `<div class="market-group-toggle" data-group-fid="${fid}" data-group-type="${esc(item.groupType)}">▼ ${item.count} variants</div>`
-        : (item.kind === 'variant' && item.isFirstOfGroup)
-          ? `<div class="market-group-toggle" data-group-fid="${fid}" data-group-type="${esc(item.groupType)}">▲ Hide variants</div>`
-          : ''
-      const variant = [...(line.marketParts?.params || []), line.marketParts?.period]
-        .filter(Boolean).join(' · ')
-      html += `
-          <td class="prices${item.kind === 'variant' ? ' market-variant' : ''}">
-            ${variant ? `<div class="odds-variant-label">${esc(variant)}</div>` : ''}
-            ${line.pricesData?.prices?.length
-              ? formatPrices(line.pricesData.prices, line.pricesData.priceNames, line.priceDirs, fid)
-              : '<span class="odds-waiting">Waiting for odds</span>'}
-            <button type="button" class="odds-history" data-line-key="${esc(line.key)}">Odds history</button>
-            ${groupToggleHtml}
-          </td>
-        </tr>`
-    })
+    const stateShort = fx.stateCode != null ? gameStateShort(fx.stateCode) : null
+    const stateHtml = stateShort
+      ? `<span class="state-badge${fx.isLive ? ' state-live' : ''}" title="${esc(fx.stateLabel || stateShort)}">${fx.isLive ? '<span class="state-dot"></span>' : ''}${esc(stateShort)}</span>`
+      : ''
+    const scoreHtml = fx.scoreText ? `<span class="fix-score">${esc(fx.scoreText)}</span>` : ''
+    const eventCount = (scoreEvents.get(fid) || []).length
+    const eventsButton = eventCount && !expanded
+      ? `<button type="button" class="fix-events-link card-action" data-events-fid="${fid}">${eventCount} match event${eventCount === 1 ? '' : 's'}</button>`
+      : ''
+    const expandButton = isExpandable
+      ? `<button type="button" class="fix-expand card-action" data-fid="${fid}" aria-expanded="${expanded}" aria-controls="fixture-markets-${fid}">Half markets</button>`
+      : ''
+    const markets = displayLines.map((line, index) =>
+      renderFixtureMarket(line, fid, index === 0 ? expandButton : '')
+    ).join('')
+    const cards = hasOdds ? pricedCards : waitingCards
+    cards.push(`
+      <article class="fixture-card${hasOdds ? ' fixture-card-priced' : ''}">
+        <header class="fixture-card-header">
+          <div class="fix-sub">${esc(fx.kickoff)} · ${esc(fx.competition)}</div>
+          ${stateHtml}
+        </header>
+        <h3 class="fix-title">${isRecentlyUpdated(fx) ? '<span class="recent-dot" title="Updated in the last 30s"></span>' : ''}${esc(fx.name)}${scoreHtml}</h3>
+        ${statsRowHtml(fx.stats)}
+        <div class="fixture-markets" id="fixture-markets-${fid}">${markets}</div>
+        ${expanded ? recentEventsHtml(fid) : ''}
+        ${eventsButton || fx.updated ? `
+          <footer class="fixture-card-footer">
+            ${fx.updated ? `<span class="fix-updated">Updated ${esc(fx.updated)} · ${fx.updateCount} update${fx.updateCount === 1 ? '' : 's'}</span>` : ''}
+            ${eventsButton}
+          </footer>` : ''}
+      </article>`)
   }
-  tbody.innerHTML = html
-  fixtureCountEl.textContent = `${fixtureIds.length} fixture${fixtureIds.length === 1 ? '' : 's'}`
+
+  const sections = [
+    ['Latest odds', pricedCards],
+    ['Awaiting odds', waitingCards],
+  ]
+  const sectionHtml = sections.filter(([, cards]) => cards.length).map(([title, cards]) => `
+    <section class="fixture-section">
+      <h2>${title}</h2>
+      <div class="fixture-grid">${cards.join('')}</div>
+    </section>`).join('') || `<p class="fixture-empty">${fixtureSnapshotLoaded
+    ? (searchQuery ? 'No fixtures match your search.' : 'No upcoming fixtures.')
+    : 'Loading fixtures…'}</p>`
+  const hasMore = fixtureIds.length > visibleFixtureIds.length
+  const html = sectionHtml + (hasMore
+    ? '<button type="button" class="show-more-fixtures">Show more fixtures</button>'
+    : '')
+  if (html !== lastFixtureHtml) {
+    fixtureCards.innerHTML = html
+    lastFixtureHtml = html
+  }
+  fixtureCountEl.textContent = hasMore
+    ? `${visibleFixtureIds.length} of ${fixtureIds.length} fixtures`
+    : `${fixtureIds.length} fixture${fixtureIds.length === 1 ? '' : 's'}`
+}
+
+function renderFixtureMarket(line, fid, expandButton) {
+  if (!line) return '<p class="odds-waiting">Waiting for odds</p>'
+
+  const variant = [...(line.marketParts?.params || []), line.marketParts?.period]
+    .filter(Boolean).join(' · ')
+  return `
+    <div class="fixture-market${line.key === lastFlashKey ? ' flash' : ''}">
+      <div class="fixture-market-header">
+        <div class="fixture-market-label">
+          <span>${esc(variant || line.marketParts?.type || 'Match Odds')}</span>
+          ${expandButton}
+        </div>
+        <button type="button" class="odds-history card-action" data-line-key="${esc(line.key)}">Odds history</button>
+      </div>
+      ${line.pricesData?.prices?.length
+        ? `<div class="fixture-prices">${formatPrices(line.pricesData.prices, line.pricesData.priceNames, line.priceDirs, fid)}</div>`
+        : '<p class="odds-waiting">Waiting for odds</p>'}
+    </div>`
 }
 
 function tickClock() {
@@ -779,19 +738,6 @@ function setStatus(s) {
   statusTextEl.textContent = s
 }
 
-function updateTotalUpdatesDisplay() {
-  const count = selectedCompetition
-    ? (competitionUpdateCounts.get(selectedCompetition) || 0)
-    : totalUpdateCount
-  totalUpdatesEl.textContent = `${count} update${count === 1 ? '' : 's'}`
-}
-
-function selectCompetition(value) {
-  selectedCompetition = value
-  updateTotalUpdatesDisplay()
-  render()
-}
-
 // --- Startup ---
 
 async function loadFixtureNames() {
@@ -799,19 +745,12 @@ async function loadFixtureNames() {
     const res = await fetch('/fixtures', { signal: AbortSignal.timeout(30000) })
     if (res.ok) {
       const snapshot = await res.json()
+      fixtureSnapshotLoaded = true
       fixturesCache.clear()
       for (const f of snapshot) {
         fixturesCache.set(f.FixtureId, f)
-        const fid = f.FixtureId
-        const fx = ensureFixture(fid)
-        const previousCompetition = fx.competition
-        resolveNameFromCache(fid)
-        if (fx.competition !== previousCompetition && fx.updateCount) {
-          const count = competitionUpdateCounts.get(fx.competition) || 0
-          competitionUpdateCounts.set(fx.competition, count + fx.updateCount)
-        }
+        resolveNameFromCache(f.FixtureId)
       }
-      updateTotalUpdatesDisplay()
       render()
       renderHistoryPanel()
       setTimeout(loadFixtureNames, 60000)
@@ -868,11 +807,8 @@ function init() {
       fx.updatedAtMs = Date.now()
       fx.updateCount++  // total odds updates received for this fixture, across all its markets
       totalUpdateCount++  // total odds updates received across every fixture/market
-      if (fx.competition && fx.competition !== '—') {
-        competitionUpdateCounts.set(fx.competition, (competitionUpdateCounts.get(fx.competition) || 0) + 1)
-      }
-      lastUpdateEl.textContent = `Updated ${fx.updated}`  // global "last update across the whole feed"
-      updateTotalUpdatesDisplay()
+      lastUpdateEl.textContent = `Updated ${fx.updated}`
+      totalUpdatesEl.textContent = `${totalUpdateCount} update${totalUpdateCount === 1 ? '' : 's'}`
 
       pushHistory(line.key, d)
       flash(line.key)
@@ -927,12 +863,8 @@ function init() {
 
   fixtureSearchInput.addEventListener('input', () => {
     searchQuery = fixtureSearchInput.value.trim().toLowerCase()
+    fixtureDisplayLimit = FIXTURE_PAGE_SIZE
     render()
-  })
-
-  logoLink.addEventListener('click', (e) => {
-    e.preventDefault()
-    selectCompetition('')
   })
 
   historyClose.addEventListener('click', closeMarketPanel)
@@ -941,7 +873,12 @@ function init() {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeAllPanels()
   })
-  tbody.addEventListener('click', (e) => {
+  fixtureCards.addEventListener('click', (e) => {
+    if (e.target.closest('.show-more-fixtures')) {
+      fixtureDisplayLimit += FIXTURE_PAGE_SIZE
+      render()
+      return
+    }
     const historyButton = e.target.closest('.odds-history')
     if (historyButton) {
       openMarketPanel(historyButton.dataset.lineKey)
@@ -953,28 +890,13 @@ function init() {
       openEventsPanel(Number(eventsLink.dataset.eventsFid))
       return
     }
-    const groupToggle = e.target.closest('.market-group-toggle')
-    if (groupToggle) {
-      e.stopPropagation()
-      const key = marketGroupKey(Number(groupToggle.dataset.groupFid), groupToggle.dataset.groupType)
-      if (expandedMarketGroups.has(key)) expandedMarketGroups.delete(key)
-      else expandedMarketGroups.add(key)
-      render()
-      return
-    }
-    const competitionLink = e.target.closest('.competition-link')
-    if (competitionLink) {
-      e.stopPropagation()
-      const competition = competitionLink.dataset.competition
-      selectCompetition(competition === selectedCompetition ? '' : competition)
-      return
-    }
-    const nameCell = e.target.closest('.fix-name.expandable')
-    if (!nameCell) return
-    const fx = fixtures.get(Number(nameCell.dataset.fid))
+    const expandButton = e.target.closest('.fix-expand')
+    if (!expandButton) return
+    const fx = fixtures.get(Number(expandButton.dataset.fid))
     if (!fx) return
     fx.expanded = !fx.expanded
     render()
+    fixtureCards.querySelector(`.fix-expand[data-fid="${Number(expandButton.dataset.fid)}"]`)?.focus()
   })
 }
 

@@ -4,46 +4,42 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GENX-SPORTSBOOK</title>
+  <link rel="icon" href="/favicon.ico">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Black+Ops+One&family=Roboto:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div id="topbar">
-    <div class="topbar-left">
-      <a class="title" href="/" id="logoLink">GENX-<span class="title-accent">SPORTSBOOK</span></a>
-      <a class="powered-by" href="https://txline-docs.txodds.com/documentation/quickstart"
-         target="_blank" rel="noopener noreferrer">powered by TxLine</a>
-    </div>
-    <div class="topbar-right">
-      <input type="search" id="fixtureSearch" class="fixture-search" placeholder="Search fixtures…"
-             aria-label="Search fixtures">
+  <header class="dashboard-header">
+    <h1><a class="title" href="/">GENX-<span class="title-accent">SPORTSBOOK</span></a></h1>
+    <input type="search" id="fixtureSearch" class="fixture-search" placeholder="Search fixtures…"
+           aria-label="Search fixtures">
+  </header>
+
+  <main id="dashboard" class="fixture-board" aria-label="Fixtures">
+    <div id="fixtureCards"><p class="fixture-empty">Loading fixtures…</p></div>
+  </main>
+
+  <footer class="dashboard-status" aria-label="Dashboard status">
+    <div class="dashboard-status-content">
+      <span class="status" role="status">
+        <span id="statusDot" class="dot" aria-hidden="true"></span>
+        <span id="statusText">connecting</span>
+      </span>
       <span id="fixtureCount" class="stat">0 fixtures</span>
       <span id="totalUpdates" class="stat">0 updates</span>
       <span id="lastUpdate" class="stat">Updated —</span>
       <span id="clock" class="stat">00:00:00</span>
-      <span class="status">
-        <span id="statusDot" class="dot"></span>
-        <span id="statusText">connecting</span>
-      </span>
+      <a class="powered-by" href="https://txline.txodds.com"
+         target="_blank" rel="noopener noreferrer">powered by TxLine</a>
     </div>
-  </div>
-
-  <table id="dashboard">
-    <thead>
-      <tr>
-        <th>Fixture</th>
-        <th>Prices</th>
-      </tr>
-    </thead>
-    <tbody id="rows"></tbody>
-  </table>
+  </footer>
 
   <div id="backdrop" class="backdrop"></div>
-  <aside id="historyPanel" class="history-panel">
+  <aside id="historyPanel" class="history-panel odds-history-panel" aria-labelledby="historyTitle">
     <div class="history-header">
-      <span id="historyTitle"></span>
+      <div id="historyTitle"></div>
       <button id="historyClose" class="close-btn" aria-label="Close">&times;</button>
     </div>
     <div id="historyList" class="history-list"></div>

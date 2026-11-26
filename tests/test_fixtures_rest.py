@@ -2,11 +2,10 @@
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-import httpx
 import pytest
 
 from txline.models import Fixture
-from txline.rest.fixtures import get_fixtures, get_fixtures_window
+from txline.rest.fixtures import get_fixtures_window
 
 
 def _fixture(fid: int, comp: str = "MLS") -> Fixture:
@@ -22,7 +21,7 @@ def _fixture(fid: int, comp: str = "MLS") -> Fixture:
 async def test_merges_fixtures_across_days():
     today = int(datetime.now(timezone.utc).timestamp() // 86400)
 
-    async def fake_get_fixtures(client, jwt, api_token, start_epoch_day=None, competition_id=None, **kwargs):
+    async def fake_get_fixtures(client, jwt, api_token, start_epoch_day=None, competition_id=None):
         if start_epoch_day == today - 1:
             return [_fixture(1)]
         if start_epoch_day == today:
@@ -38,7 +37,7 @@ async def test_merges_fixtures_across_days():
 
 @pytest.mark.asyncio
 async def test_dedupes_fixture_present_in_multiple_days():
-    async def fake_get_fixtures(client, jwt, api_token, start_epoch_day=None, competition_id=None, **kwargs):
+    async def fake_get_fixtures(client, jwt, api_token, start_epoch_day=None, competition_id=None):
         return [_fixture(1)]
 
     with patch("txline.rest.fixtures.get_fixtures", new=fake_get_fixtures):
@@ -52,7 +51,7 @@ async def test_dedupes_fixture_present_in_multiple_days():
 async def test_default_window_is_yesterday_and_today():
     seen_days = []
 
-    async def fake_get_fixtures(client, jwt, api_token, start_epoch_day=None, competition_id=None, **kwargs):
+    async def fake_get_fixtures(client, jwt, api_token, start_epoch_day=None, competition_id=None):
         seen_days.append(start_epoch_day)
         return []
 
@@ -67,7 +66,7 @@ async def test_default_window_is_yesterday_and_today():
 async def test_competition_id_passed_through_to_each_day():
     captured = []
 
-    async def fake_get_fixtures(client, jwt, api_token, start_epoch_day=None, competition_id=None, **kwargs):
+    async def fake_get_fixtures(client, jwt, api_token, start_epoch_day=None, competition_id=None):
         captured.append(competition_id)
         return []
 
@@ -75,16 +74,3 @@ async def test_competition_id_passed_through_to_each_day():
         await get_fixtures_window(client=None, jwt="j", api_token="t", competition_id=42)
 
     assert captured == [42, 42]
-
-
-async def test_filters_snapshot_before_constructing_fixture_models():
-    snapshot = [
-        _fixture(1, "Premier League").model_dump(),
-        {"Competition": "Other league"},
-    ]
-    transport = httpx.MockTransport(lambda _: httpx.Response(200, json=snapshot))
-    async with httpx.AsyncClient(transport=transport) as client:
-        fixtures = await get_fixtures(
-            client, "j", "t", include_competition=lambda name: name == "Premier League",
-        )
-    assert [fixture.FixtureId for fixture in fixtures] == [1]

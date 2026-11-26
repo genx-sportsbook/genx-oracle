@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented here.
 
+## [1.1.6] - 2026-11-26
+
+### Fixed
+
+- Identify the English Premier League by its verified TxLINE competition ID
+  so other leagues with the same name cannot appear in the dashboard.
+
+### Changed
+
+- Present fixtures and odds history as responsive cards. Show all available
+  markets for a fixture with one click on Half markets.
+- List fixtures with prices first. Within each group, sort by kickoff and
+  then home team name. Show up to nine fixtures initially, with access to
+  more fixtures and search across the full schedule.
+- Move live status to the bottom, enlarge the GENX-SPORTSBOOK wordmark,
+  update the TxLine link, and add the GenX favicon.
+
 ## [1.1.5] - 2026-11-26
 
 ### Changed
