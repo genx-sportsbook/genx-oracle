@@ -48,11 +48,6 @@ DASHBOARD_COMPETITIONS = frozenset({
     "premier league",
     "english premier league",
     "england premier league",
-    "friendlies",
-    "international friendly",
-    "international friendlies",
-    "international international friendlies",
-    "international international friendly",
 })
 
 

@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here.
 
+## [1.1.5] - 2026-11-26
+
+### Changed
+
+- Limit the dashboard to English Premier League fixtures.
+- Remove the Market column and make odds history available in the Prices column.
+
 ## [1.1.4] - 2026-11-26
 
 ### Changed

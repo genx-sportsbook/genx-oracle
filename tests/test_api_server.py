@@ -56,13 +56,16 @@ async def test_fixtures_passes_credentials(app):
     assert captured["days_after"] == 3
 
 
-async def test_fixtures_only_return_selected_competitions(app):
+async def test_fixtures_only_return_english_premier_league(app):
     fixtures = [
         FIXTURE_1,
         FIXTURE_1.model_copy(update={"FixtureId": 2, "Competition": "International Friendlies"}),
         FIXTURE_1.model_copy(update={"FixtureId": 3, "Competition": "Russian Premier League"}),
         FIXTURE_1.model_copy(update={"FixtureId": 4, "Competition": "NBA"}),
         FIXTURE_1.model_copy(update={"FixtureId": 5, "Competition": "World Cup"}),
+        FIXTURE_1.model_copy(update={"FixtureId": 6, "Competition": "Friendlies"}),
+        FIXTURE_1.model_copy(update={"FixtureId": 7, "Competition": "Premier League"}),
+        FIXTURE_1.model_copy(update={"FixtureId": 8, "Competition": "Premier League 2"}),
     ]
     async def fetch_window(client, jwt, api_token, *, days_after, include_competition):
         return [f for f in fixtures if include_competition(f.Competition)]
@@ -71,7 +74,7 @@ async def test_fixtures_only_return_selected_competitions(app):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             response = await c.get("/fixtures")
 
-    assert [fixture["FixtureId"] for fixture in response.json()] == [FIXTURE_1.FixtureId, 2]
+    assert [fixture["FixtureId"] for fixture in response.json()] == [FIXTURE_1.FixtureId, 7]
 
 
 async def test_odds_stream_sse_format(app):

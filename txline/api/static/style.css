@@ -220,13 +220,6 @@ td.fix-name {
 /* Same look as .fix-updated but a size step down — this is a separate class
    (not a shared one) specifically so the per-market update line can be
    tuned independently of the fixture-level one going forward. */
-.market-updated {
-  margin-top: 4px;
-  font-size: 11px;
-  color: var(--text-muted);
-  opacity: 0.75;
-}
-
 /* --- Match state / score / events (from the scores stream) --- */
 
 .state-badge {
@@ -430,10 +423,6 @@ tbody tr:not(.group-start) td {
 
 /* --- Market chip --- */
 
-td.market {
-  white-space: nowrap;
-}
-
 /* A market renders as a row of separate boxes — one per facet (type / line /
    period) — each in its own color, rather than one run-on label. */
 .chip-market-group {
@@ -474,16 +463,6 @@ td.market {
   --part-bg: rgba(107, 114, 128, 0.1);
 }
 
-/* Clickable only in the main table — opens this line's history panel. */
-.chip-market-click {
-  cursor: pointer;
-}
-
-.chip-market-click:hover .chip-market-part {
-  border-color: var(--accent-cyan);
-  box-shadow: 0 0 8px rgba(56, 189, 248, 0.4);
-}
-
 /* --- Market-type grouping (variant tree) --- */
 
 .market-group-toggle {
@@ -501,12 +480,12 @@ td.market {
 
 /* A variant row, once its group is expanded, gets a dashed guide line to
    read as nested under the group it belongs to rather than a sibling market. */
-td.market.market-variant {
+td.prices.market-variant {
   padding-left: 32px;
   position: relative;
 }
 
-td.market.market-variant::before {
+td.prices.market-variant::before {
   content: '';
   position: absolute;
   left: 16px;
@@ -656,4 +635,24 @@ td.prices {
 
 .odds-waiting {
   opacity: 0.75;
+}
+
+.odds-history {
+  background: none;
+  border: 0;
+  color: var(--accent-cyan);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.odds-history:hover,
+.odds-history:focus-visible {
+  text-decoration: underline;
+}
+
+.odds-variant-label {
+  margin-bottom: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
 }

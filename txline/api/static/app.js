@@ -89,13 +89,7 @@ function marketLabel(d) {
   return parts.join(' · ')
 }
 
-// parts is a marketParts() result. key is the line's lineKey; pass it only
-// when the chip should open that line's history panel on click (the main
-// table). History-panel chips pass no key and render as plain,
-// non-interactive badges. Each component (type / line / period) renders as
-// its own colored box so they read as distinct facets of the market rather
-// than one run-on label.
-function formatMarketChip(parts, key) {
+function formatMarketChip(parts) {
   if (!parts || !parts.type) return '—'
   const boxes = [`<span class="chip-market-part chip-market-type">${esc(parts.type)}</span>`]
   for (const p of parts.params) {
@@ -104,10 +98,7 @@ function formatMarketChip(parts, key) {
   if (parts.period) {
     boxes.push(`<span class="chip-market-part chip-market-period">${esc(parts.period)}</span>`)
   }
-  const inner = boxes.join('')
-  const cls = key ? 'chip-market-group chip-market-click' : 'chip-market-group'
-  const attr = key ? ` data-line-key="${esc(key)}"` : ''
-  return `<span class="${cls}"${attr}>${inner}</span>`
+  return `<span class="chip-market-group">${boxes.join('')}</span>`
 }
 
 function marketSignature(d) {
@@ -709,7 +700,6 @@ function render() {
     const fx = fixtures.get(fid) || { name: String(fid), competition: '—', kickoff: '—', kickoffTs: null, updated: '', updatedAtMs: null, updateCount: 0, expanded: false }
     const groupLines = groups.get(fid).sort(compareLines)
     const isExpandable = groupLines.length > 1
-    const marketTypeCount = new Set(groupLines.map(l => l.superOddsType)).size
     const displayItems = fx.expanded && isExpandable
       ? buildExpandedDisplayList(fid, groupLines)
       : [{ kind: 'single', line: pickDefaultLine(groupLines) }]
@@ -723,7 +713,7 @@ function render() {
         // clickable to toggle either way (see the tbody click handler), so
         // once expanded there's nothing this label needs to say.
         const expandHint = (isExpandable && !fx.expanded)
-          ? `<div class="fix-expand">▼ ${marketTypeCount} market type${marketTypeCount === 1 ? '' : 's'}</div>`
+          ? `<div class="fix-expand">▼ ${groupLines.length} odds variants</div>`
           : ''
         const stateShort = fx.stateCode != null ? gameStateShort(fx.stateCode) : null
         const stateHtml = stateShort
@@ -750,7 +740,7 @@ function render() {
           </td>`
       }
       if (!line) {
-        html += '<td class="market">Match Odds</td><td class="prices odds-waiting">Waiting for odds</td></tr>'
+        html += '<td class="prices odds-waiting">Waiting for odds</td></tr>'
         return
       }
       // A market-type group collapses to its default variant with a "N
@@ -762,15 +752,17 @@ function render() {
         : (item.kind === 'variant' && item.isFirstOfGroup)
           ? `<div class="market-group-toggle" data-group-fid="${fid}" data-group-type="${esc(item.groupType)}">▲ Hide variants</div>`
           : ''
+      const variant = [...(line.marketParts?.params || []), line.marketParts?.period]
+        .filter(Boolean).join(' · ')
       html += `
-          <td class="market${item.kind === 'variant' ? ' market-variant' : ''}">
-            ${formatMarketChip(line.marketParts, line.key)}
+          <td class="prices${item.kind === 'variant' ? ' market-variant' : ''}">
+            ${variant ? `<div class="odds-variant-label">${esc(variant)}</div>` : ''}
+            ${line.pricesData?.prices?.length
+              ? formatPrices(line.pricesData.prices, line.pricesData.priceNames, line.priceDirs, fid)
+              : '<span class="odds-waiting">Waiting for odds</span>'}
+            <button type="button" class="odds-history" data-line-key="${esc(line.key)}">Odds history</button>
             ${groupToggleHtml}
-            <div class="market-updated">${line.updated ? `Updated ${esc(line.updated)} · ${line.updateCount} update${line.updateCount === 1 ? '' : 's'}` : ''}</div>
           </td>
-          <td class="prices">${line.pricesData?.prices?.length
-            ? formatPrices(line.pricesData.prices, line.pricesData.priceNames, line.priceDirs, fid)
-            : '<span class="odds-waiting">Waiting for odds</span>'}</td>
         </tr>`
     })
   }
@@ -950,9 +942,9 @@ function init() {
     if (e.key === 'Escape') closeAllPanels()
   })
   tbody.addEventListener('click', (e) => {
-    const chip = e.target.closest('.chip-market-click')
-    if (chip) {
-      openMarketPanel(chip.dataset.lineKey)
+    const historyButton = e.target.closest('.odds-history')
+    if (historyButton) {
+      openMarketPanel(historyButton.dataset.lineKey)
       return
     }
     const eventsLink = e.target.closest('.fix-events-link')

@@ -60,6 +60,8 @@ test('renders scheduled fixtures in kickoff order and replaces the waiting label
     assert.match(tbody.innerHTML, /Team 1[\s\S]*Waiting for odds[\s\S]*Team 2[\s\S]*Waiting for odds/)
     assert.doesNotMatch(tbody.innerHTML, /Team [34]/)
     assert.equal(fixtureCountEl.textContent, '2 fixtures')
+    assert.doesNotMatch(tbody.innerHTML, /<td class="market/)
+    assert.doesNotMatch(tbody.innerHTML, /Odds history/)
 
     const line = ensureLine(1, MATCH_ODDS_TYPE)
     line.superOddsType = MATCH_ODDS_TYPE
@@ -68,6 +70,7 @@ test('renders scheduled fixtures in kickoff order and replaces the waiting label
     render()
     assert.match(tbody.innerHTML, /Team 1[\s\S]*2\.000[\s\S]*Team 2[\s\S]*Waiting for odds/)
     assert.equal((tbody.innerHTML.match(/Waiting for odds/g) || []).length, 1)
+    assert.match(tbody.innerHTML, /<button[^>]+data-line-key="1::1X2_PARTICIPANT_RESULT">Odds history<\/button>/)
 
     searchQuery = 'visitors'
     selectedCompetition = 'Friendlies'
