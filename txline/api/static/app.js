@@ -54,17 +54,15 @@ function prettifyMarketParams(raw) {
   })
 }
 
-// MarketPeriod is also a "key=value" string. Only "half=1" has ever been
-// observed live, and TxLINE's docs/OpenAPI spec don't cover MarketPeriod at
-// all (confirmed 2026-08-19 — no enum, no example, not mentioned on any
-// documentation page including the odds-coverage/overview pages, which
-// explicitly say to read markets off the wire rather than assume a fixed
-// catalog). So "1st Half" is our best-effort reading of the "half=1"
-// convention, not a vendor-confirmed fact — "half=2" is hardcoded on the
-// same assumption since it hasn't appeared on the wire yet.
+// The feed uses "fulltime" for full-match markets. Older records can omit it.
+function normalizeMarketPeriod(period) {
+  return period === 'fulltime' ? '' : (period || '')
+}
+
 const HALF_NAMES = { 1: '1st Half', 2: '2nd Half' }
 
-function prettifyMarketPeriod(raw) {
+function prettifyMarketPeriod(period) {
+  const raw = normalizeMarketPeriod(period)
   if (!raw) return ''
   const [key, value] = raw.split('=')
   if (key === 'half' && value !== undefined) return HALF_NAMES[value] || `Half ${value}`
@@ -113,7 +111,7 @@ function formatMarketChip(parts, key) {
 }
 
 function marketSignature(d) {
-  return `${d.SuperOddsType}|${d.MarketParameters || ''}|${d.MarketPeriod || ''}`
+  return `${d.SuperOddsType}|${d.MarketParameters || ''}|${normalizeMarketPeriod(d.MarketPeriod)}`
 }
 
 // --- Score / match-event decoding ---
@@ -286,10 +284,19 @@ function describeScoreEvent(d) {
 const CHIP_HUES = 3  // cycle cyan / violet / teal per price position
 
 // directions is an optional array parallel to prices: 'up' | 'down' | null per index
-function formatPrices(prices, priceNames, directions) {
+function formatPrices(prices, priceNames, directions, fixtureId) {
   if (!prices || prices.length === 0) return '—'
+  const fixture = fixturesCache.get(fixtureId)
+  const selectionLabels = {
+    part1: fixture?.Participant1 || 'Participant 1',
+    part2: fixture?.Participant2 || 'Participant 2',
+    draw: 'Draw',
+    over: 'Over',
+    under: 'Under',
+  }
   return prices.map((p, i) => {
-    const label = priceNames && priceNames[i] ? esc(priceNames[i]) : `P${i + 1}`
+    const name = priceNames?.[i]
+    const label = esc(Object.hasOwn(selectionLabels, name) ? selectionLabels[name] : (name || `P${i + 1}`))
     const val = (p / 1000).toFixed(3)
     const dir = directions && directions[i]
     const arrow = dir === 'up' ? '▲' : dir === 'down' ? '▼' : ''
@@ -351,7 +358,7 @@ const HISTORY_LIMIT = 50
 const fixturesCache = new Map()  // fixtureId (number) -> Fixture object from /fixtures
 const fixtures = new Map()       // fixtureId (number) -> { name, competition, kickoff }
 const lines = new Map()          // lineKey (fixtureId::marketSig) -> line row object, one per market/line
-const history = new Map()        // lineKey -> array of {ts, pricesHtml}, newest first, one market/line per entry
+const history = new Map()        // lineKey -> array of {ts, prices, priceNames}, newest first, one market/line per entry
 const scoreEvents = new Map()    // fixtureId -> array of {ts, icon, cls, text}, newest first, one per score event
 let lineOrderCounter = 0
 let lastFlashKey = null
@@ -584,7 +591,8 @@ function pushHistory(key, d) {
   const arr = history.get(key)
   arr.unshift({
     ts: timeNow(),
-    pricesHtml: formatPrices(d.Prices, d.PriceNames, null),
+    prices: d.Prices,
+    priceNames: d.PriceNames,
   })
   if (arr.length > HISTORY_LIMIT) arr.length = HISTORY_LIMIT
 }
@@ -603,7 +611,7 @@ function renderHistoryPanel() {
     : entries.map(e => `
         <div class="history-entry">
           <span class="h-time">${esc(e.ts)}</span>
-          <div class="h-prices">${e.pricesHtml}</div>
+          <div class="h-prices">${formatPrices(e.prices, e.priceNames, null, line?.fixtureId)}</div>
         </div>
       `).join('')
 }
@@ -754,7 +762,7 @@ function render() {
             ${groupToggleHtml}
             <div class="market-updated">${line.updated ? `Updated ${esc(line.updated)} · ${line.updateCount} update${line.updateCount === 1 ? '' : 's'}` : ''}</div>
           </td>
-          <td class="prices">${line.pricesData ? formatPrices(line.pricesData.prices, line.pricesData.priceNames, line.priceDirs) : '—'}</td>
+          <td class="prices">${line.pricesData ? formatPrices(line.pricesData.prices, line.pricesData.priceNames, line.priceDirs, fid) : '—'}</td>
         </tr>`
     })
   }
@@ -880,6 +888,7 @@ async function loadFixtureNames() {
       }
       updateTotalUpdatesDisplay()
       render()
+      renderHistoryPanel()
       return
     }
   } catch (err) {
@@ -922,7 +931,7 @@ function init() {
 
       line.superOddsType = d.SuperOddsType
       line.marketParameters = d.MarketParameters || null
-      line.marketPeriod = d.MarketPeriod || null
+      line.marketPeriod = normalizeMarketPeriod(d.MarketPeriod)
       line.market = marketLabel(d)
       line.marketParts = marketParts(d)
       line.pricesData = { prices: d.Prices || null, priceNames: d.PriceNames || null }

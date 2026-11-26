@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here.
 
+## [1.1.2] - 2026-11-26
+
+### Fixed
+
+- Recognize TxLINE's explicit full-time period and prefer full-match odds in
+  collapsed fixture rows.
+- Show fixture participant names beside their prices in the odds table and
+  market history.
+
 ## [1.1.1] - 2026-11-26
 
 ### Fixed
