@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import time
-from contextlib import asynccontextmanager
+from contextlib import aclosing, asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
@@ -14,9 +14,11 @@ import uvicorn
 from fastapi import FastAPI, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from httpx_sse import SSEError
 from sse_starlette.sse import EventSourceResponse
 
-from txline.auth import load_credentials
+from txline.auth import get_guest_jwt, load_credentials
+from txline.exceptions import TxLineStreamError
 from txline.models import Heartbeat, TokenCredentials
 from txline.rest.fixtures import get_fixtures_window
 from txline.streams.odds import stream_odds
@@ -44,6 +46,51 @@ FIXTURES_REFRESH_INTERVAL = 240  # seconds
 FIXTURE_FIELDS = ("FixtureId", "Participant1", "Participant2", "Competition", "StartTime")
 
 
+JWT_REFRESH_COOLDOWN = 30  # seconds
+
+
+class UpstreamCredentials:
+    """Share JWT recovery across the fixture cache and both SSE feeds."""
+
+    def __init__(self, creds: TokenCredentials, path: Path | None):
+        self.current = creds
+        self._file_creds = creds
+        self._path = path
+        self._lock = asyncio.Lock()
+        self._next_refresh = 0.0
+
+    async def recover(self, rejected: TokenCredentials) -> bool:
+        async with self._lock:
+            if self._path is not None:
+                try:
+                    replacement = load_credentials(self._path)
+                except (OSError, ValueError, TypeError):
+                    logger.warning("Could not load updated TxLINE credentials")
+                else:
+                    if replacement is not None and replacement != self._file_creds:
+                        self._file_creds = self.current = replacement
+                        self._next_refresh = 0.0
+            if self.current is not rejected:
+                return True
+            if time.monotonic() < self._next_refresh:
+                return False
+
+            try:
+                async with httpx.AsyncClient(timeout=10) as client:
+                    jwt = await get_guest_jwt(client)
+                if not isinstance(jwt, str) or not jwt.strip():
+                    raise ValueError("Missing guest JWT")
+            except (httpx.HTTPError, ValueError, KeyError, TypeError):
+                logger.warning("Could not renew TxLINE guest JWT")
+                return False
+            finally:
+                self._next_refresh = time.monotonic() + JWT_REFRESH_COOLDOWN
+
+            self.current = rejected.model_copy(update={"jwt": jwt})
+            logger.info("Renewed TxLINE guest JWT")
+            return True
+
+
 class FixturesCache:
     """Serialized-bytes cache for the fixture snapshot, refreshed off-request.
 
@@ -54,8 +101,8 @@ class FixturesCache:
     entirely — a cache hit is now just handing back a bytes object.
     """
 
-    def __init__(self, creds: TokenCredentials):
-        self._creds = creds
+    def __init__(self, auth: UpstreamCredentials):
+        self._auth = auth
         self._body: Optional[bytes] = None
         self._fetched_at = 0.0
         self._client: Optional[httpx.AsyncClient] = None
@@ -81,9 +128,14 @@ class FixturesCache:
 
     async def _fetch(self) -> None:
         """Fetch and re-encode. Callers must hold self._lock."""
-        fixtures = await get_fixtures_window(
-            self._http(), self._creds.jwt, self._creds.api_token
-        )
+        creds = self._auth.current
+        try:
+            fixtures = await get_fixtures_window(self._http(), creds.jwt, creds.api_token)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != 401 or not await self._auth.recover(creds):
+                raise
+            creds = self._auth.current
+            fixtures = await get_fixtures_window(self._http(), creds.jwt, creds.api_token)
         self._body = json.dumps(
             [{k: getattr(f, k) for k in FIXTURE_FIELDS} for f in fixtures],
             separators=(",", ":"),
@@ -119,8 +171,9 @@ class FixturesCache:
         return self._body
 
 
-def create_app(creds: TokenCredentials) -> FastAPI:
-    cache = FixturesCache(creds)
+def create_app(creds: TokenCredentials, credentials_path: Path | None = None) -> FastAPI:
+    auth = UpstreamCredentials(creds, credentials_path)
+    cache = FixturesCache(auth)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -184,27 +237,38 @@ def create_app(creds: TokenCredentials) -> FastAPI:
             )
         return Response(content=body, media_type="application/json")
 
-    async def _odds_events(fixture_id: Optional[int]):
-        async for event in stream_odds(creds.jwt, creds.api_token, fixture_id=fixture_id):
-            if isinstance(event, Heartbeat):
-                yield {"event": "heartbeat", "data": json.dumps({"Ts": event.Ts})}
-            else:
-                yield {"event": "odds", "data": event.model_dump_json()}
+    async def stream_events(stream, feed: str, fixture_id: int | None):
+        for attempt in range(2):
+            creds = auth.current
+            try:
+                events = stream(creds.jwt, creds.api_token, fixture_id=fixture_id)
+                async with aclosing(events):
+                    async for event in events:
+                        if isinstance(event, Heartbeat):
+                            yield {"event": "heartbeat", "data": json.dumps({"Ts": event.Ts})}
+                        else:
+                            yield {"event": feed, "data": event.model_dump_json()}
+                return
+            except TxLineStreamError as exc:
+                if exc.status_code == 401 and attempt == 0 and await auth.recover(creds):
+                    continue
+                status = (
+                    "authentication failed" if exc.status_code in (401, 403) else "feed unavailable"
+                )
+                logger.warning("TxLINE %s stream rejected with status %s", feed, exc.status_code)
+            except (httpx.HTTPError, SSEError):
+                status = "feed unavailable"
+                logger.warning("TxLINE %s stream connection failed", feed)
+            yield {"event": "feed_status", "data": status, "retry": 5000}
+            return
 
     @app.get("/odds/stream")
     async def odds_stream(fixture_id: Optional[int] = Query(default=None, alias="fixtureId")):
-        return EventSourceResponse(_odds_events(fixture_id))
-
-    async def _scores_events(fixture_id: Optional[int]):
-        async for event in stream_scores(creds.jwt, creds.api_token, fixture_id=fixture_id):
-            if isinstance(event, Heartbeat):
-                yield {"event": "heartbeat", "data": json.dumps({"Ts": event.Ts})}
-            else:
-                yield {"event": "scores", "data": event.model_dump_json()}
+        return EventSourceResponse(stream_events(stream_odds, "odds", fixture_id))
 
     @app.get("/scores/stream")
     async def scores_stream(fixture_id: Optional[int] = Query(default=None, alias="fixtureId")):
-        return EventSourceResponse(_scores_events(fixture_id))
+        return EventSourceResponse(stream_events(stream_scores, "scores", fixture_id))
 
     app.mount(
         "/",
@@ -227,4 +291,4 @@ def cli(credentials: str, host: str, port: int) -> None:
         raise click.ClickException(
             f"No credentials at {credentials}. Run `txline-subscribe` first."
         )
-    uvicorn.run(create_app(creds), host=host, port=port)
+    uvicorn.run(create_app(creds, Path(credentials)), host=host, port=port)

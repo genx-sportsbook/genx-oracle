@@ -39,13 +39,14 @@ async def stream_odds(
     if fixture_id is not None:
         params["fixtureId"] = str(fixture_id)
 
-    async with httpx.AsyncClient(timeout=None) as client:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10, read=60)) as client:
         async with aconnect_sse(client, "GET", STREAM_URL, headers=headers, params=params) as src:
             if src.response.status_code != 200:
                 body = (await src.response.aread()).decode("utf-8", errors="replace").strip()
                 raise TxLineStreamError(
                     f"Odds stream request failed (status={src.response.status_code}, "
-                    f"fixture_id={fixture_id}): {body or '(empty response body)'}"
+                    f"fixture_id={fixture_id}): {body or '(empty response body)'}",
+                    status_code=src.response.status_code,
                 )
             async for event in src.aiter_sse():
                 if event.event == "heartbeat":

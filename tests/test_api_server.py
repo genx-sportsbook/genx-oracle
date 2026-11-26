@@ -5,6 +5,7 @@ import pytest
 from httpx import AsyncClient, ASGITransport
 from unittest.mock import patch, AsyncMock
 from txline.api.server import create_app
+from txline.exceptions import TxLineStreamError
 from txline.models import Fixture, OddsUpdate, ScoreUpdate, Heartbeat, TokenCredentials
 
 
@@ -224,3 +225,75 @@ async def test_fixtures_returns_503_when_upstream_fails_with_empty_cache(app):
             r = await c.get("/fixtures")
 
     assert r.status_code == 503
+
+
+async def test_concurrent_feed_401s_share_guest_jwt_refresh(app):
+    credentials_used = []
+
+    async def upstream(jwt, api_token, fixture_id=None):
+        credentials_used.append((jwt, api_token))
+        if jwt == "test-jwt":
+            raise TxLineStreamError("rejected", status_code=401)
+        yield Heartbeat(Ts=2000)
+
+    async def new_jwt(client):
+        await asyncio.sleep(0.01)
+        return "new-jwt"
+
+    with (
+        patch("txline.api.server.stream_odds", upstream),
+        patch("txline.api.server.stream_scores", upstream),
+        patch("txline.api.server.get_guest_jwt", side_effect=new_jwt) as refresh,
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            responses = await asyncio.gather(c.get("/odds/stream"), c.get("/scores/stream"))
+
+    refresh.assert_awaited_once()
+    assert credentials_used.count(("new-jwt", "test-token")) == 2
+    assert all("event: heartbeat" in response.text for response in responses)
+
+
+async def test_repeated_stream_401_reports_authentication_failure(app):
+    upstream = AsyncMock(side_effect=TxLineStreamError("private details", status_code=401))
+
+    async def odds(*args, **kwargs):
+        yield await upstream(*args, **kwargs)
+
+    with (
+        patch("txline.api.server.stream_odds", odds),
+        patch("txline.api.server.get_guest_jwt", return_value="new-jwt") as refresh,
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            first = await c.get("/odds/stream")
+            second = await c.get("/odds/stream")
+
+    refresh.assert_awaited_once()
+    assert upstream.await_count == 3
+    for response in (first, second):
+        assert "event: feed_status" in response.text
+        assert "data: authentication failed" in response.text
+        assert "private details" not in response.text
+
+
+async def test_fixture_401_loads_replaced_credentials_file(creds, tmp_path):
+    path = tmp_path / "credentials.json"
+    app = create_app(creds, path)
+    path.write_text(TokenCredentials(jwt="replacement-jwt", api_token="replacement-token")
+                    .model_dump_json())
+    rejected = httpx.Response(401, request=httpx.Request("GET", "https://example.test"))
+
+    async def upstream(client, jwt, api_token):
+        if jwt == "test-jwt":
+            rejected.raise_for_status()
+        assert (jwt, api_token) == ("replacement-jwt", "replacement-token")
+        return [FIXTURE_1]
+
+    with (
+        patch("txline.api.server.get_fixtures_window", upstream),
+        patch("txline.api.server.get_guest_jwt") as refresh,
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            response = await c.get("/fixtures")
+
+    refresh.assert_not_called()
+    assert response.json()[0]["FixtureId"] == FIXTURE_1.FixtureId

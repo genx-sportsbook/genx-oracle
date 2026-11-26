@@ -45,8 +45,8 @@ python3 -m venv .venv
 ## Architecture
 
 The credential lifecycle is:
-1. **One-time setup** — `txline-subscribe` generates a guest JWT, submits a zero-cost on-chain `subscribe` transaction, NaCl-signs the activation message with the wallet key, and POSTs to `/api/token/activate`. The resulting `{jwt, api_token}` pair is persisted to `.txline-credentials.json`. The guest JWT is short-lived (~30 days) and is reused as the bearer token on every subsequent request — there's no refresh flow, so re-run `txline-subscribe` once it expires (this is why data can silently stop flowing after a while, with no other symptom).
-2. **Runtime** — `TxLineClient` loads credentials from that file and uses `Authorization: Bearer {jwt}` + `X-Api-Token: {api_token}` on every request.
+1. **One-time setup** — `txline-subscribe` generates a guest JWT, submits a zero-cost on-chain `subscribe` transaction, NaCl-signs the activation message with the wallet key, and POSTs to `/api/token/activate`. The resulting `{jwt, api_token}` pair is persisted to `.txline-credentials.json`.
+2. **Runtime** — `TxLineClient` loads credentials from that file and uses `Authorization: Bearer {jwt}` + `X-Api-Token: {api_token}` on every request. On upstream HTTP 401, `txline-server` checks for a replacement credentials file or obtains a fresh guest JWT from `/auth/guest/start` and retries once with the existing API token. Fixture refresh and both streams share this recovery. The fresh JWT is held in process memory.
 
 **SSE streaming** (`txline/streams/`) uses `httpx-sse`. Both streams (`/api/odds/stream`, `/api/scores/stream`) support optional `fixtureId` filtering and reconnect via `Last-Event-ID`. Streams yield typed Pydantic models (`OddsUpdate | Heartbeat`, `ScoreUpdate | Heartbeat`).
 

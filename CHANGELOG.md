@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here.
 
+## [1.1.1] - 2026-11-26
+
+### Fixed
+
+- Renew the TxLINE guest JWT on upstream HTTP 401 and retry with the existing
+  API token. Fixtures, odds, and scores share the refresh.
+- Start dashboard streams while fixtures load and display authentication and
+  feed failures in the connection indicator.
+
 ## [1.1.0] - 2026-11-02
 
 ### Fixed

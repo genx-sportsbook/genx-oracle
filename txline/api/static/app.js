@@ -767,7 +767,7 @@ function tickClock() {
 }
 
 function setStatus(s) {
-  statusDotEl.className = 'dot' + (s === 'live' ? ' live' : s === 'reconnecting' ? ' reconnecting' : '')
+  statusDotEl.className = 'dot' + (s === 'live' ? ' live' : s === 'connecting' ? '' : ' reconnecting')
   statusTextEl.textContent = s
 }
 
@@ -863,29 +863,55 @@ function selectCompetition(value, label) {
 
 // --- Startup ---
 
-async function init() {
-  populateCompetitionFilter(SUPPORTED_COMPETITIONS)
-
-  // Fetch fixture names for name resolution (non-fatal on failure)
+async function loadFixtureNames() {
   try {
-    const res = await fetch('/fixtures')
+    const res = await fetch('/fixtures', { signal: AbortSignal.timeout(30000) })
     if (res.ok) {
-      const fixtures = await res.json()
-      for (const f of fixtures) {
+      for (const f of await res.json()) {
         fixturesCache.set(f.FixtureId, f)
       }
+      for (const [fid, fx] of fixtures) {
+        const previousCompetition = fx.competition
+        resolveNameFromCache(fid)
+        if (fx.competition !== previousCompetition && fx.updateCount) {
+          const count = competitionUpdateCounts.get(fx.competition) || 0
+          competitionUpdateCounts.set(fx.competition, count + fx.updateCount)
+        }
+      }
+      updateTotalUpdatesDisplay()
+      render()
+      return
     }
   } catch (err) {
     console.warn('Fixture fetch failed, running with raw IDs:', err)
   }
+  setTimeout(loadFixtureNames, 30000)
+}
 
-  // Odds stream
+function init() {
+  populateCompetitionFilter(SUPPORTED_COMPETITIONS)
+  loadFixtureNames()
+
   const oddsEs = new EventSource('/odds/stream')
-  oddsEs.addEventListener('open', () => setStatus('live'))
-  oddsEs.addEventListener('error', () => setStatus('reconnecting'))
+  let feedFailure = null
+  const markLive = () => {
+    feedFailure = null
+    setStatus('live')
+  }
+  oddsEs.addEventListener('heartbeat', markLive)
+  oddsEs.addEventListener('feed_status', (e) => {
+    feedFailure = e.data
+    setStatus(feedFailure)
+  })
+  oddsEs.addEventListener('error', () => {
+    setStatus(feedFailure || (oddsEs.readyState === EventSource.CLOSED
+      ? 'feed unavailable'
+      : 'reconnecting'))
+  })
   oddsEs.addEventListener('odds', (e) => {
     try {
       const d = JSON.parse(e.data)
+      markLive()
       const fid = d.FixtureId
       const fx = ensureFixture(fid)
       resolveNameFromCache(fid)

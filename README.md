@@ -47,6 +47,12 @@ python3 -m venv .venv
 
 Open `http://localhost:8000` for the live browser dashboard.
 
+On an upstream HTTP 401, `txline-server` refreshes the guest JWT in memory
+and retries with the existing API token. The credentials mount stays read-only.
+If TxLINE rejects the API token or the subscription expires, check the
+subscription and update the credentials Secret with a valid pair.
+[TxLINE authentication troubleshooting](https://txline-docs.txodds.com/documentation/examples/troubleshooting)
+
 ## Docker
 
 ```bash
