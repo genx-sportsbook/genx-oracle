@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here.
 
+## [1.1.4] - 2026-11-26
+
+### Changed
+
+- Show fixtures kicking off in the next 72 hours, with a waiting indicator
+  until Match Odds prices arrive.
+- Remove the competition dropdown from the top bar. Fixture search and
+  filtering by competition from individual fixture rows remain available.
+
 ## [1.1.3] - 2026-11-26
 
 ### Changed

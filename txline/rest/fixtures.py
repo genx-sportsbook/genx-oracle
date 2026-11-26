@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -20,6 +21,8 @@ async def get_fixtures(
     api_token: str,
     start_epoch_day: Optional[int] = None,
     competition_id: Optional[int] = None,
+    *,
+    include_competition: Callable[[str], bool] | None = None,
 ) -> list[Fixture]:
     headers = {
         "Authorization": f"Bearer {jwt}",
@@ -33,7 +36,10 @@ async def get_fixtures(
 
     resp = await client.get(FIXTURES_URL, headers=headers, params=params)
     resp.raise_for_status()
-    return [Fixture(**item) for item in resp.json()]
+    return [
+        Fixture(**item) for item in resp.json()
+        if include_competition is None or include_competition(item.get("Competition", ""))
+    ]
 
 
 async def get_fixtures_window(
@@ -43,6 +49,8 @@ async def get_fixtures_window(
     competition_id: Optional[int] = None,
     days_before: int = 1,
     days_after: int = 0,
+    *,
+    include_competition: Callable[[str], bool] | None = None,
 ) -> list[Fixture]:
     """
     Merges /fixtures/snapshot across a small window of day-buckets.
@@ -60,12 +68,17 @@ async def get_fixtures_window(
     """
     today = int(datetime.now(timezone.utc).timestamp() // 86400)
     days = range(today - days_before, today + days_after + 1)
-    results = await asyncio.gather(*[
-        get_fixtures(client, jwt, api_token, start_epoch_day=day, competition_id=competition_id)
-        for day in days
-    ])
     merged: dict[int, Fixture] = {}
-    for day_fixtures in results:
-        for f in day_fixtures:
-            merged[f.FixtureId] = f
+    # Keep at most two global snapshots in flight when looking further ahead.
+    for offset in range(0, len(days), 2):
+        results = await asyncio.gather(*[
+            get_fixtures(
+                client, jwt, api_token, start_epoch_day=day, competition_id=competition_id,
+                include_competition=include_competition,
+            )
+            for day in days[offset:offset + 2]
+        ])
+        for day_fixtures in results:
+            for f in day_fixtures:
+                merged[f.FixtureId] = f
     return list(merged.values())

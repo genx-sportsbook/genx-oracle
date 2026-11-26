@@ -367,17 +367,12 @@ let openLineKey = null    // market history panel — set when that panel is ope
 let openEventsFid = null  // match-events panel — set when that panel is open
 let selectedCompetition = ''  // '' = no filter, show every competition
 let searchQuery = ''          // '' = no filter; lowercased substring matched against fixture name
-let highlightedIndex = -1     // index into dropdownOptions(), for keyboard nav
 let totalUpdateCount = 0      // odds updates received across every fixture/market, for the whole session
 const competitionUpdateCounts = new Map()  // competition name -> odds updates received for that competition
 
 const tbody = document.getElementById('rows')
 const fixtureSearchInput = document.getElementById('fixtureSearch')
 const logoLink = document.getElementById('logoLink')
-const competitionDropdown = document.getElementById('competitionDropdown')
-const competitionTrigger = document.getElementById('competitionTrigger')
-const competitionTriggerLabel = document.getElementById('competitionTriggerLabel')
-const competitionList = document.getElementById('competitionList')
 const fixtureCountEl = document.getElementById('fixtureCount')
 const totalUpdatesEl = document.getElementById('totalUpdates')
 const lastUpdateEl = document.getElementById('lastUpdate')
@@ -417,15 +412,13 @@ function isRecentlyUpdated(fx) {
 }
 
 function resolveNameFromCache(fid) {
-  const fx = fixtures.get(fid)
   const fix = fixturesCache.get(fid)
   if (!fix) return
-  if (fx.name === String(fid)) {
-    fx.name = `${fix.Participant1} vs ${fix.Participant2}`
-    fx.competition = fix.Competition
-    fx.kickoff = formatKickoff(fix.StartTime)
-    fx.kickoffTs = fix.StartTime || null
-  }
+  const fx = ensureFixture(fid)
+  fx.name = `${fix.Participant1} vs ${fix.Participant2}`
+  fx.competition = fix.Competition
+  fx.kickoff = formatKickoff(fix.StartTime)
+  fx.kickoffTs = fix.StartTime || null
 }
 
 // One line per distinct market (marketSig) per fixture, so a fixture with
@@ -677,19 +670,28 @@ function flash(key) {
 
 // --- Render ---
 
+const UPCOMING_WINDOW_MS = 3 * 24 * 60 * 60 * 1000
+
 function render() {
-  const groups = new Map()  // fixtureId -> array of line rows
+  const now = Date.now()
+  const groups = new Map()
+  for (const [fid, fix] of fixturesCache) {
+    if (fix.StartTime >= now && fix.StartTime < now + UPCOMING_WINDOW_MS) {
+      groups.set(fid, [])
+    }
+  }
   for (const line of lines.values()) {
-    if (selectedCompetition) {
-      const fx = fixtures.get(line.fixtureId)
-      if (!fx || fx.competition !== selectedCompetition) continue
-    }
-    if (searchQuery) {
-      const fx = fixtures.get(line.fixtureId)
-      if (!fx || !fx.name.toLowerCase().includes(searchQuery)) continue
-    }
+    const kickoff = fixtures.get(line.fixtureId)?.kickoffTs
+    if (kickoff != null && kickoff >= now + UPCOMING_WINDOW_MS) continue
     if (!groups.has(line.fixtureId)) groups.set(line.fixtureId, [])
     groups.get(line.fixtureId).push(line)
+  }
+  for (const fid of groups.keys()) {
+    const fx = fixtures.get(fid)
+    if ((selectedCompetition && fx?.competition !== selectedCompetition)
+        || (searchQuery && !fx?.name.toLowerCase().includes(searchQuery))) {
+      groups.delete(fid)
+    }
   }
   // Soonest kickoff first; fixtures whose kickoff hasn't resolved yet (name
   // lookup still pending) sort to the bottom rather than jumbling in at "0".
@@ -708,14 +710,14 @@ function render() {
     const groupLines = groups.get(fid).sort(compareLines)
     const isExpandable = groupLines.length > 1
     const marketTypeCount = new Set(groupLines.map(l => l.superOddsType)).size
-    const displayItems = fx.expanded
+    const displayItems = fx.expanded && isExpandable
       ? buildExpandedDisplayList(fid, groupLines)
-      : [{ kind: 'single', line: pickDefaultLine(groupLines) }].filter(item => item.line)
+      : [{ kind: 'single', line: pickDefaultLine(groupLines) }]
 
     displayItems.forEach((item, i) => {
       const line = item.line
       const isFirst = i === 0
-      html += `<tr class="${line.key === lastFlashKey ? 'flash' : ''}${isFirst ? ' group-start' : ''}">`
+      html += `<tr class="${line?.key === lastFlashKey ? 'flash' : ''}${isFirst ? ' group-start' : ''}">`
       if (isFirst) {
         // Only hinted while collapsed — the whole name cell is already
         // clickable to toggle either way (see the tbody click handler), so
@@ -739,13 +741,17 @@ function render() {
         html += `
           <td class="fix-name${isExpandable ? ' expandable' : ''}" rowspan="${displayItems.length}" data-fid="${fid}">
             <div class="fix-title">${isRecentlyUpdated(fx) ? '<span class="recent-dot" title="Updated in the last 30s"></span>' : ''}${stateHtml}${esc(fx.name)}${scoreHtml}</div>
-            <div class="fix-sub">${esc(fx.kickoff)} · ${fx.competition && fx.competition !== '—' ? `<span class="competition-link" data-competition="${esc(fx.competition)}">${esc(fx.competition)}</span>` : esc(fx.competition)}</div>
+            <div class="fix-sub">${esc(fx.kickoff)} · ${fx.competition && fx.competition !== '—' ? `<button type="button" class="competition-link" aria-pressed="${fx.competition === selectedCompetition}" data-competition="${esc(fx.competition)}">${esc(fx.competition)}</button>` : esc(fx.competition)}</div>
             ${fx.expanded ? recentEventsHtml(fid) : ''}
             ${statsHtml}
             ${eventsLinkHtml}
             <div class="fix-updated">${fx.updated ? `Updated ${esc(fx.updated)} · ${fx.updateCount} update${fx.updateCount === 1 ? '' : 's'}` : ''}</div>
             ${expandHint}
           </td>`
+      }
+      if (!line) {
+        html += '<td class="market">Match Odds</td><td class="prices odds-waiting">Waiting for odds</td></tr>'
+        return
       }
       // A market-type group collapses to its default variant with a "N
       // variants" toggle; expanding it swaps that one row for all of its
@@ -762,7 +768,9 @@ function render() {
             ${groupToggleHtml}
             <div class="market-updated">${line.updated ? `Updated ${esc(line.updated)} · ${line.updateCount} update${line.updateCount === 1 ? '' : 's'}` : ''}</div>
           </td>
-          <td class="prices">${line.pricesData ? formatPrices(line.pricesData.prices, line.pricesData.priceNames, line.priceDirs, fid) : '—'}</td>
+          <td class="prices">${line.pricesData?.prices?.length
+            ? formatPrices(line.pricesData.prices, line.pricesData.priceNames, line.priceDirs, fid)
+            : '<span class="odds-waiting">Waiting for odds</span>'}</td>
         </tr>`
     })
   }
@@ -779,77 +787,6 @@ function setStatus(s) {
   statusTextEl.textContent = s
 }
 
-// --- Competition dropdown (custom listbox — see style.css comment for why
-// this isn't a native <select>: Chrome/Safari on macOS hand the open list
-// off to the OS to render, so CSS can't theme it there; only Firefox does.
-// This hand-built version themes identically in every browser.) ---
-
-// The dropdown used to derive its list from every Competition name in the
-// /fixtures snapshot — tens of thousands of fixtures worldwide, thousands of
-// distinct competition names — which is what made it slow to populate.
-// Hardcoded instead to TxLINE's confirmed-scores-coverage leagues
-// (https://txline.txodds.com/documentation/scores/schedule) plus
-// "Friendlies", which isn't on that schedule but still shows up constantly
-// in the odds feed (unlike scores, odds coverage isn't limited to that
-// schedule).
-const SUPPORTED_COMPETITIONS = ['MLS', 'NFL', 'Premier League', 'Friendlies']
-
-function populateCompetitionFilter(competitionNames) {
-  ;[...competitionNames].sort().forEach((name, i) => {
-    const li = document.createElement('li')
-    li.className = 'dropdown-option'
-    li.setAttribute('role', 'option')
-    li.setAttribute('aria-selected', 'false')
-    li.dataset.value = name
-    li.id = `compopt-${i}`
-    li.textContent = name
-    competitionList.appendChild(li)
-  })
-}
-
-function dropdownOptions() {
-  return [...competitionList.querySelectorAll('.dropdown-option')]
-}
-
-function setHighlighted(idx) {
-  const opts = dropdownOptions()
-  opts.forEach(o => o.classList.remove('highlighted'))
-  if (idx < 0 || idx >= opts.length) {
-    highlightedIndex = -1
-    return
-  }
-  highlightedIndex = idx
-  const opt = opts[idx]
-  opt.classList.add('highlighted')
-  competitionTrigger.setAttribute('aria-activedescendant', opt.id)
-  opt.scrollIntoView({ block: 'nearest' })
-}
-
-function openDropdown() {
-  competitionDropdown.dataset.open = 'true'
-  competitionList.hidden = false
-  competitionTrigger.setAttribute('aria-expanded', 'true')
-  const opts = dropdownOptions()
-  const currentIdx = opts.findIndex(o => o.dataset.value === selectedCompetition)
-  setHighlighted(currentIdx >= 0 ? currentIdx : 0)
-}
-
-function closeDropdown() {
-  competitionDropdown.dataset.open = 'false'
-  competitionList.hidden = true
-  competitionTrigger.setAttribute('aria-expanded', 'false')
-  competitionTrigger.removeAttribute('aria-activedescendant')
-  highlightedIndex = -1
-}
-
-function toggleDropdown() {
-  if (competitionList.hidden) openDropdown()
-  else closeDropdown()
-}
-
-// Shows the count for the selected competition, or the session total when
-// "All Competitions" is selected. Called on every odds update and whenever
-// the dropdown selection changes, so it always reflects the current filter.
 function updateTotalUpdatesDisplay() {
   const count = selectedCompetition
     ? (competitionUpdateCounts.get(selectedCompetition) || 0)
@@ -857,14 +794,8 @@ function updateTotalUpdatesDisplay() {
   totalUpdatesEl.textContent = `${count} update${count === 1 ? '' : 's'}`
 }
 
-function selectCompetition(value, label) {
+function selectCompetition(value) {
   selectedCompetition = value
-  competitionTriggerLabel.textContent = label
-  dropdownOptions().forEach(o => {
-    const isSelected = o.dataset.value === value
-    o.classList.toggle('selected', isSelected)
-    o.setAttribute('aria-selected', String(isSelected))
-  })
   updateTotalUpdatesDisplay()
   render()
 }
@@ -875,10 +806,12 @@ async function loadFixtureNames() {
   try {
     const res = await fetch('/fixtures', { signal: AbortSignal.timeout(30000) })
     if (res.ok) {
-      for (const f of await res.json()) {
+      const snapshot = await res.json()
+      fixturesCache.clear()
+      for (const f of snapshot) {
         fixturesCache.set(f.FixtureId, f)
-      }
-      for (const [fid, fx] of fixtures) {
+        const fid = f.FixtureId
+        const fx = ensureFixture(fid)
         const previousCompetition = fx.competition
         resolveNameFromCache(fid)
         if (fx.competition !== previousCompetition && fx.updateCount) {
@@ -889,6 +822,7 @@ async function loadFixtureNames() {
       updateTotalUpdatesDisplay()
       render()
       renderHistoryPanel()
+      setTimeout(loadFixtureNames, 60000)
       return
     }
   } catch (err) {
@@ -898,7 +832,6 @@ async function loadFixtureNames() {
 }
 
 function init() {
-  populateCompetitionFilter(SUPPORTED_COMPETITIONS)
   loadFixtureNames()
 
   const oddsEs = new EventSource('/odds/stream')
@@ -1005,53 +938,9 @@ function init() {
     render()
   })
 
-  // Reset to "All Competitions" in place — not a real navigation, so the
-  // live odds/scores data already received isn't lost.
   logoLink.addEventListener('click', (e) => {
     e.preventDefault()
-    closeDropdown()
-    selectCompetition('', 'All Competitions')
-  })
-
-  competitionTrigger.addEventListener('click', () => toggleDropdown())
-
-  competitionList.addEventListener('click', (e) => {
-    const opt = e.target.closest('.dropdown-option')
-    if (!opt) return
-    selectCompetition(opt.dataset.value, opt.textContent)
-    closeDropdown()
-  })
-
-  // Keep keyboard highlight in sync with the mouse so hovering doesn't leave
-  // two different rows looking highlighted at once (the hovered one via CSS
-  // :hover, and a stale keyboard-set one via the .highlighted class).
-  competitionList.addEventListener('mouseover', (e) => {
-    const opt = e.target.closest('.dropdown-option')
-    if (!opt) return
-    const idx = dropdownOptions().indexOf(opt)
-    if (idx >= 0) setHighlighted(idx)
-  })
-
-  competitionTrigger.addEventListener('keydown', (e) => {
-    const opts = dropdownOptions()
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      e.preventDefault()
-      if (competitionList.hidden) { openDropdown(); return }
-      const delta = e.key === 'ArrowDown' ? 1 : -1
-      setHighlighted(Math.max(0, Math.min(opts.length - 1, highlightedIndex + delta)))
-    } else if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault()
-      if (competitionList.hidden) { openDropdown(); return }
-      const opt = opts[highlightedIndex]
-      if (opt) selectCompetition(opt.dataset.value, opt.textContent)
-      closeDropdown()
-    } else if (e.key === 'Escape') {
-      closeDropdown()
-    }
-  })
-
-  document.addEventListener('click', (e) => {
-    if (!competitionDropdown.contains(e.target)) closeDropdown()
+    selectCompetition('')
   })
 
   historyClose.addEventListener('click', closeMarketPanel)
@@ -1084,10 +973,11 @@ function init() {
     const competitionLink = e.target.closest('.competition-link')
     if (competitionLink) {
       e.stopPropagation()
-      selectCompetition(competitionLink.dataset.competition, competitionLink.dataset.competition)
+      const competition = competitionLink.dataset.competition
+      selectCompetition(competition === selectedCompetition ? '' : competition)
       return
     }
-    const nameCell = e.target.closest('.fix-name')
+    const nameCell = e.target.closest('.fix-name.expandable')
     if (!nameCell) return
     const fx = fixtures.get(Number(nameCell.dataset.fid))
     if (!fx) return

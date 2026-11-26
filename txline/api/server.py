@@ -27,12 +27,9 @@ from txline.streams.scores import stream_scores
 logger = logging.getLogger(__name__)
 DEFAULT_CREDS = Path(".txline-credentials.json")
 
-# get_fixtures_window fetches two full days' worth of the global fixture
-# catalog (~34MB each) to cover the yesterday/today bucket boundary — see
-# its docstring. Measured end to end that's ~5s on the wire plus ~2s of
-# Pydantic validation, peaking around 600MB RSS, for ~116k fixtures. Far
-# too expensive to pay per request, and schedule data (names, kickoff
-# times, competitions) barely changes minute to minute.
+# Include all UTC buckets that can intersect the next 72 hours, plus
+# yesterday for games still in progress after midnight.
+FIXTURES_DAYS_AHEAD = 3
 FIXTURES_CACHE_TTL = 300  # seconds — how stale a cached body may get
 
 # Refresh ahead of the TTL so a browser request never lands on an expired
@@ -51,6 +48,7 @@ DASHBOARD_COMPETITIONS = frozenset({
     "premier league",
     "english premier league",
     "england premier league",
+    "friendlies",
     "international friendly",
     "international friendlies",
     "international international friendlies",
@@ -59,6 +57,8 @@ DASHBOARD_COMPETITIONS = frozenset({
 
 
 def is_dashboard_fixture(competition: str) -> bool:
+    if not isinstance(competition, str):
+        return False
     name = " ".join(competition.casefold().replace("-", " ").replace(":", " ").split())
     return name in DASHBOARD_COMPETITIONS
 
@@ -148,13 +148,18 @@ class FixturesCache:
         """Fetch and re-encode. Callers must hold self._lock."""
         creds = self._auth.current
         try:
-            fixtures = await get_fixtures_window(self._http(), creds.jwt, creds.api_token)
+            fixtures = await get_fixtures_window(
+                self._http(), creds.jwt, creds.api_token, days_after=FIXTURES_DAYS_AHEAD,
+                include_competition=is_dashboard_fixture,
+            )
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code != 401 or not await self._auth.recover(creds):
                 raise
             creds = self._auth.current
-            fixtures = await get_fixtures_window(self._http(), creds.jwt, creds.api_token)
-        fixtures = [f for f in fixtures if is_dashboard_fixture(f.Competition)]
+            fixtures = await get_fixtures_window(
+                self._http(), creds.jwt, creds.api_token, days_after=FIXTURES_DAYS_AHEAD,
+                include_competition=is_dashboard_fixture,
+            )
         self._body = json.dumps(
             [{k: getattr(f, k) for k in FIXTURE_FIELDS} for f in fixtures],
             separators=(",", ":"),

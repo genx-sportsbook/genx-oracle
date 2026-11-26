@@ -44,6 +44,7 @@ async def test_fixtures_passes_credentials(app):
     async def mock_get_fixtures(http, jwt, api_token, **kwargs):
         captured["jwt"] = jwt
         captured["api_token"] = api_token
+        captured["days_after"] = kwargs["days_after"]
         return []
 
     with patch("txline.api.server.get_fixtures_window", new=mock_get_fixtures):
@@ -52,6 +53,7 @@ async def test_fixtures_passes_credentials(app):
 
     assert captured["jwt"] == "test-jwt"
     assert captured["api_token"] == "test-token"
+    assert captured["days_after"] == 3
 
 
 async def test_fixtures_only_return_selected_competitions(app):
@@ -62,7 +64,10 @@ async def test_fixtures_only_return_selected_competitions(app):
         FIXTURE_1.model_copy(update={"FixtureId": 4, "Competition": "NBA"}),
         FIXTURE_1.model_copy(update={"FixtureId": 5, "Competition": "World Cup"}),
     ]
-    with patch("txline.api.server.get_fixtures_window", return_value=fixtures):
+    async def fetch_window(client, jwt, api_token, *, days_after, include_competition):
+        return [f for f in fixtures if include_competition(f.Competition)]
+
+    with patch("txline.api.server.get_fixtures_window", new=fetch_window):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             response = await c.get("/fixtures")
 
@@ -313,7 +318,7 @@ async def test_fixture_401_loads_replaced_credentials_file(creds, tmp_path):
                     .model_dump_json())
     rejected = httpx.Response(401, request=httpx.Request("GET", "https://example.test"))
 
-    async def upstream(client, jwt, api_token):
+    async def upstream(client, jwt, api_token, **kwargs):
         if jwt == "test-jwt":
             rejected.raise_for_status()
         assert (jwt, api_token) == ("replacement-jwt", "replacement-token")
