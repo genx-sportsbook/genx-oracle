@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here.
 
+## [1.1.3] - 2026-11-26
+
+### Changed
+
+- Limit dashboard fixtures and scores to the English Premier League and
+  international friendlies, and forward only Match Odds (1X2) for those fixtures.
+
 ## [1.1.2] - 2026-11-26
 
 ### Fixed

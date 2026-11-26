@@ -20,7 +20,7 @@ def app(creds):
 
 
 FIXTURE_1 = Fixture(
-    Ts=1000, StartTime=1781830800000, Competition="World Cup",
+    Ts=1000, StartTime=1781830800000, Competition="England - Premier League",
     CompetitionId=1, FixtureGroupId=1, Participant1Id=1,
     Participant1="Mexico", Participant2Id=2, Participant2="South Korea",
     FixtureId=17588223, Participant1IsHome=True,
@@ -35,7 +35,7 @@ async def test_fixtures_returns_list(app):
     data = r.json()
     assert len(data) == 1
     assert data[0]["FixtureId"] == 17588223
-    assert data[0]["Competition"] == "World Cup"
+    assert data[0]["Competition"] == "England - Premier League"
 
 
 async def test_fixtures_passes_credentials(app):
@@ -54,15 +54,38 @@ async def test_fixtures_passes_credentials(app):
     assert captured["api_token"] == "test-token"
 
 
+async def test_fixtures_only_return_selected_competitions(app):
+    fixtures = [
+        FIXTURE_1,
+        FIXTURE_1.model_copy(update={"FixtureId": 2, "Competition": "International Friendlies"}),
+        FIXTURE_1.model_copy(update={"FixtureId": 3, "Competition": "Russian Premier League"}),
+        FIXTURE_1.model_copy(update={"FixtureId": 4, "Competition": "NBA"}),
+        FIXTURE_1.model_copy(update={"FixtureId": 5, "Competition": "World Cup"}),
+    ]
+    with patch("txline.api.server.get_fixtures_window", return_value=fixtures):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            response = await c.get("/fixtures")
+
+    assert [fixture["FixtureId"] for fixture in response.json()] == [FIXTURE_1.FixtureId, 2]
+
+
 async def test_odds_stream_sse_format(app):
     async def mock_odds(jwt, api_token, fixture_id=None, last_event_id=None):
-        yield OddsUpdate(
-            FixtureId=1, MessageId="m1", Ts=1000, Bookmaker="bet365",
-            BookmakerId=1, SuperOddsType="1x2", InRunning=False,
+        match_odds = OddsUpdate(
+            FixtureId=FIXTURE_1.FixtureId, MessageId="match-odds", Ts=1000, Bookmaker="bet365",
+            BookmakerId=1, SuperOddsType="1X2_PARTICIPANT_RESULT", InRunning=False,
         )
+        yield match_odds
+        yield match_odds.model_copy(update={
+            "MessageId": "other-market", "SuperOddsType": "EUROHANDICAP_PARTICIPANT_POINTS",
+        })
+        yield match_odds.model_copy(update={"MessageId": "other-fixture", "FixtureId": 10})
         yield Heartbeat(Ts=2000)
 
-    with patch("txline.api.server.stream_odds", new=mock_odds):
+    with (
+        patch("txline.api.server.stream_odds", new=mock_odds),
+        patch("txline.api.server.get_fixtures_window", return_value=[FIXTURE_1]),
+    ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             async with c.stream("GET", "/odds/stream") as r:
                 assert r.status_code == 200
@@ -73,7 +96,9 @@ async def test_odds_stream_sse_format(app):
 
     text = content.decode()
     assert "event: odds" in text
-    assert '"FixtureId":1' in text
+    assert '"MessageId":"match-odds"' in text
+    assert "other-market" not in text
+    assert "other-fixture" not in text
     assert "event: heartbeat" in text
 
 
@@ -95,17 +120,22 @@ async def test_odds_stream_fixture_id_passthrough(app):
 
 async def test_scores_stream_sse_format(app):
     async def mock_scores(jwt, api_token, fixture_id=None, last_event_id=None):
-        yield ScoreUpdate(
-            fixtureId=99, gameState="active", startTime=1000,
+        score = ScoreUpdate(
+            fixtureId=FIXTURE_1.FixtureId, gameState="active", startTime=1000,
             participant1Id=1, participant2Id=2, competitionId=1,
             countryId=1, sportId=1, fixtureGroupId=1,
             isTeam=True, participant1IsHome=True,
             action="goal", id=1, ts=1000,
             connectionId=1, seq=1,
         )
+        yield score
+        yield score.model_copy(update={"fixtureId": 99})
         yield Heartbeat(Ts=3000)
 
-    with patch("txline.api.server.stream_scores", new=mock_scores):
+    with (
+        patch("txline.api.server.stream_scores", new=mock_scores),
+        patch("txline.api.server.get_fixtures_window", return_value=[FIXTURE_1]),
+    ):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             async with c.stream("GET", "/scores/stream") as r:
                 assert r.status_code == 200
@@ -116,7 +146,8 @@ async def test_scores_stream_sse_format(app):
 
     text = content.decode()
     assert "event: scores" in text
-    assert '"fixtureId":99' in text
+    assert f'"fixtureId":{FIXTURE_1.FixtureId}' in text
+    assert '"fixtureId":99' not in text
     assert "event: heartbeat" in text
 
 

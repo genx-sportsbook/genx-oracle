@@ -19,7 +19,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from txline.auth import get_guest_jwt, load_credentials
 from txline.exceptions import TxLineStreamError
-from txline.models import Heartbeat, TokenCredentials
+from txline.models import Heartbeat, OddsUpdate, TokenCredentials
 from txline.rest.fixtures import get_fixtures_window
 from txline.streams.odds import stream_odds
 from txline.streams.scores import stream_scores
@@ -44,6 +44,23 @@ FIXTURES_REFRESH_INTERVAL = 240  # seconds
 # Trimming halves the response — 34MB -> 16MB — and, more importantly, cuts
 # the serialization from ~3.2s of event-loop-blocking work down to ~0.3s.
 FIXTURE_FIELDS = ("FixtureId", "Participant1", "Participant2", "Competition", "StartTime")
+
+
+MATCH_ODDS_TYPE = "1X2_PARTICIPANT_RESULT"
+DASHBOARD_COMPETITIONS = frozenset({
+    "premier league",
+    "english premier league",
+    "england premier league",
+    "international friendly",
+    "international friendlies",
+    "international international friendlies",
+    "international international friendly",
+})
+
+
+def is_dashboard_fixture(competition: str) -> bool:
+    name = " ".join(competition.casefold().replace("-", " ").replace(":", " ").split())
+    return name in DASHBOARD_COMPETITIONS
 
 
 JWT_REFRESH_COOLDOWN = 30  # seconds
@@ -104,6 +121,7 @@ class FixturesCache:
     def __init__(self, auth: UpstreamCredentials):
         self._auth = auth
         self._body: Optional[bytes] = None
+        self.fixture_ids: frozenset[int] = frozenset()
         self._fetched_at = 0.0
         self._client: Optional[httpx.AsyncClient] = None
         # Single-flight: without it, concurrent cold requests would each
@@ -136,10 +154,12 @@ class FixturesCache:
                 raise
             creds = self._auth.current
             fixtures = await get_fixtures_window(self._http(), creds.jwt, creds.api_token)
+        fixtures = [f for f in fixtures if is_dashboard_fixture(f.Competition)]
         self._body = json.dumps(
             [{k: getattr(f, k) for k in FIXTURE_FIELDS} for f in fixtures],
             separators=(",", ":"),
         ).encode()
+        self.fixture_ids = frozenset(f.FixtureId for f in fixtures)
         self._fetched_at = time.monotonic()
         logger.info("fixtures cache refreshed: %d fixtures, %d bytes",
                     len(fixtures), len(self._body))
@@ -238,6 +258,7 @@ def create_app(creds: TokenCredentials, credentials_path: Path | None = None) ->
         return Response(content=body, media_type="application/json")
 
     async def stream_events(stream, feed: str, fixture_id: int | None):
+        checked_snapshot = False
         for attempt in range(2):
             creds = auth.current
             try:
@@ -246,7 +267,17 @@ def create_app(creds: TokenCredentials, credentials_path: Path | None = None) ->
                     async for event in events:
                         if isinstance(event, Heartbeat):
                             yield {"event": "heartbeat", "data": json.dumps({"Ts": event.Ts})}
+                            continue
+                        if isinstance(event, OddsUpdate):
+                            if event.SuperOddsType != MATCH_ODDS_TYPE:
+                                continue
+                            event_fixture_id = event.FixtureId
                         else:
+                            event_fixture_id = event.fixtureId
+                        if not checked_snapshot:
+                            await cache.body()
+                            checked_snapshot = True
+                        if event_fixture_id in cache.fixture_ids:
                             yield {"event": feed, "data": event.model_dump_json()}
                 return
             except TxLineStreamError as exc:
