@@ -2,8 +2,18 @@ apiVersion: v1
 entries:
   txline-server:
   - apiVersion: v2
+    appVersion: 1.1.6
+    created: "2026-11-26T20:11:39.047000624Z"
+    description: TxLINE SSE proxy server
+    digest: 723c2de5a05cad7c28cf80fc0b9bfde7dccfd3cc3f04c1607fe60ffadb9887ae
+    name: txline-server
+    type: application
+    urls:
+    - https://genx-sportsbook.github.io/genx-oracle/txline-server-1.1.6.tgz
+    version: 1.1.6
+  - apiVersion: v2
     appVersion: 1.1.5
-    created: "2026-11-26T13:39:56.647323586Z"
+    created: "2026-11-26T20:11:39.046870729Z"
     description: TxLINE SSE proxy server
     digest: 2cebbde19c42b5312e06627123ad42a1e776036bc4919c1503b1f56224adf379
     name: txline-server
@@ -13,7 +23,7 @@ entries:
     version: 1.1.5
   - apiVersion: v2
     appVersion: 1.1.4
-    created: "2026-11-26T13:39:56.647158948Z"
+    created: "2026-11-26T20:11:39.046729677Z"
     description: TxLINE SSE proxy server
     digest: 8fc4e5b85fc11eedde5439da0417deba40d7ad7f7499a16b6596882b122a0f04
     name: txline-server
@@ -23,7 +33,7 @@ entries:
     version: 1.1.4
   - apiVersion: v2
     appVersion: 1.1.3
-    created: "2026-11-26T13:39:56.646965676Z"
+    created: "2026-11-26T20:11:39.0465734Z"
     description: TxLINE SSE proxy server
     digest: 3f8ad53dd9ba9047a313659f39d13a166dfb8eb46e422a02e5c21edbd76a4c74
     name: txline-server
@@ -33,7 +43,7 @@ entries:
     version: 1.1.3
   - apiVersion: v2
     appVersion: 1.1.2
-    created: "2026-11-26T13:39:56.646778183Z"
+    created: "2026-11-26T20:11:39.04643216Z"
     description: TxLINE SSE proxy server
     digest: 7718e73b3f1d4f7e6fe35bc56cdb5f3061125c6c5176697ab179d986f4bfe2ee
     name: txline-server
@@ -43,7 +53,7 @@ entries:
     version: 1.1.2
   - apiVersion: v2
     appVersion: 1.1.1
-    created: "2026-11-26T13:39:56.646624932Z"
+    created: "2026-11-26T20:11:39.046282007Z"
     description: TxLINE SSE proxy server
     digest: 2f5c259ef2296c1bc6979986e3c38fc0e2ab75021a7d14198674f09f2e5d5ca6
     name: txline-server
@@ -53,7 +63,7 @@ entries:
     version: 1.1.1
   - apiVersion: v2
     appVersion: 1.1.0
-    created: "2026-11-26T13:39:56.646444419Z"
+    created: "2026-11-26T20:11:39.046152054Z"
     description: TxLINE SSE proxy server
     digest: c43870b4952735aeee79a476131f6be44a6394ff2c4bd79d4a9da2b785c3616f
     name: txline-server
@@ -63,7 +73,7 @@ entries:
     version: 1.1.0
   - apiVersion: v2
     appVersion: 1.0.9
-    created: "2026-11-26T13:39:56.646268924Z"
+    created: "2026-11-26T20:11:39.04601832Z"
     description: TxLINE SSE proxy server
     digest: e08d7fc64edf20ff66ceaf4695f0436afc20183329b37443f79155f442bfbc47
     name: txline-server
@@ -73,7 +83,7 @@ entries:
     version: 1.0.9
   - apiVersion: v2
     appVersion: 1.0.8
-    created: "2026-11-26T13:39:56.646137616Z"
+    created: "2026-11-26T20:11:39.045906821Z"
     description: TxLINE SSE proxy server
     digest: d8f589652b8b8bed6f9c3bcc7d2333e5d1d3c359ae2f413e000eb11e4efe210e
     name: txline-server
@@ -83,7 +93,7 @@ entries:
     version: 1.0.8
   - apiVersion: v2
     appVersion: 1.0.7
-    created: "2026-11-26T13:39:56.646007419Z"
+    created: "2026-11-26T20:11:39.045794193Z"
     description: TxLINE SSE proxy server
     digest: 0a1b1aff7cdbe2224436b8bda0e013b5e159db860351552b200be838ea9b5e75
     name: txline-server
@@ -93,7 +103,7 @@ entries:
     version: 1.0.7
   - apiVersion: v2
     appVersion: 1.0.6
-    created: "2026-11-26T13:39:56.645862641Z"
+    created: "2026-11-26T20:11:39.045675443Z"
     description: TxLINE SSE proxy server
     digest: 7510dcf35fc00d20cf3b208dc843ab7709fc772f5c13aedf3732ef8cfe4ebc9e
     name: txline-server
@@ -103,7 +113,7 @@ entries:
     version: 1.0.6
   - apiVersion: v2
     appVersion: 1.0.5
-    created: "2026-11-26T13:39:56.645707447Z"
+    created: "2026-11-26T20:11:39.045543575Z"
     description: TxLINE SSE proxy server
     digest: d29c9a7dd373de2a4e6104249b77bfd2af6548d7f414effd306688d15dd7346d
     name: txline-server
@@ -113,7 +123,7 @@ entries:
     version: 1.0.5
   - apiVersion: v2
     appVersion: 1.0.4
-    created: "2026-11-26T13:39:56.645540915Z"
+    created: "2026-11-26T20:11:39.045415746Z"
     description: TxLINE SSE proxy server
     digest: cc7541f4848b67efdee9e7a4dea2cd4d4ea3a1eba0c59105c6a6b815a5907205
     name: txline-server
@@ -123,7 +133,7 @@ entries:
     version: 1.0.4
   - apiVersion: v2
     appVersion: 1.0.3
-    created: "2026-11-26T13:39:56.645360062Z"
+    created: "2026-11-26T20:11:39.045277244Z"
     description: TxLINE SSE proxy server
     digest: e39efe56c23f45761b491b0211919577eaae65a828b21f4299d49d2117f752ec
     name: txline-server
@@ -133,7 +143,7 @@ entries:
     version: 1.0.3
   - apiVersion: v2
     appVersion: 1.0.2
-    created: "2026-11-26T13:39:56.645178138Z"
+    created: "2026-11-26T20:11:39.045147754Z"
     description: TxLINE SSE proxy server
     digest: fd6cee51a080e46aefc367a5d6022689508a1ecf8096e3a9be36d8409cdbc64b
     name: txline-server
@@ -143,7 +153,7 @@ entries:
     version: 1.0.2
   - apiVersion: v2
     appVersion: 1.0.1
-    created: "2026-11-26T13:39:56.645009283Z"
+    created: "2026-11-26T20:11:39.044994203Z"
     description: TxLINE SSE proxy server
     digest: ea9dba58c3558d2898b1685395b412972830c95760ba0de4e86b20fd3d59e3dd
     name: txline-server
@@ -153,7 +163,7 @@ entries:
     version: 1.0.1
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2026-11-26T13:39:56.644813267Z"
+    created: "2026-11-26T20:11:39.044853907Z"
     description: TxLINE SSE proxy server
     digest: 293ba0784275d3c298ecd31c098400c34cad63c25058aaa6681a328a1fdea95f
     name: txline-server
@@ -163,7 +173,7 @@ entries:
     version: 1.0.0
   - apiVersion: v2
     appVersion: 0.0.1
-    created: "2026-11-26T13:39:56.6445965Z"
+    created: "2026-11-26T20:11:39.044697632Z"
     description: TxLINE SSE proxy server
     digest: 6ccc21ab46b80785188b873bdee405c2e646de6bf77b4134748f4033dc917afb
     name: txline-server
@@ -171,4 +181,4 @@ entries:
     urls:
     - https://genx-sportsbook.github.io/genx-oracle/txline-server-0.0.1.tgz
     version: 0.0.1
-generated: "2026-11-26T13:39:56.644276987Z"
+generated: "2026-11-26T20:11:39.044379487Z"
