@@ -117,7 +117,8 @@ const GAME_STATE_BY_CODE = {
 }
 
 const LIVE_STATES = new Set([
-  '1st Half', '2nd Half', 'Extra Time 1st Half', 'Extra Time 2nd Half', 'Penalty Shootout',
+  '1st Half', 'Half Time', '2nd Half', 'Waiting for Extra Time', 'Extra Time 1st Half',
+  'Extra Time Half Time', 'Extra Time 2nd Half', 'Waiting for Penalties', 'Penalty Shootout',
 ])
 
 // Fixture.GameState (numeric, from /fixtures) or ScoreUpdate.gameState (short
@@ -225,7 +226,7 @@ function describeScoreEvent(d) {
   if (key === 'corner') return { icon: '🚩', cls: 'evt-corner', text: 'Corner' }
   if (key === 'shot') {
     const label = SHOT_OUTCOME_LABELS[pick(data, 'Outcome', 'outcome')]
-    return { icon: '🎯', cls: 'evt-shot', text: 'Shot' + (label ? ` — ${label}` : '') }
+    return { icon: { OnTarget: '🎯', Woodwork: '💥', Blocked: '🛡️' }[pick(data, 'Outcome', 'outcome')] || '👟', cls: 'evt-shot', text: 'Shot' + (label ? ` — ${label}` : '') }
   }
   if (key === 'freekick') {
     const label = FREE_KICK_LABELS[pick(data, 'FreeKickType', 'freeKickType')]
@@ -238,12 +239,12 @@ function describeScoreEvent(d) {
   if (key === 'penaltyattempt') return { icon: '⚠️', cls: 'evt-penalty', text: 'Penalty Awarded' }
   if (key === 'penaltyoutcome') {
     const label = PENALTY_OUTCOME_LABELS[pick(data, 'Outcome', 'outcome')]
-    return { icon: '🥅', cls: 'evt-penalty', text: 'Penalty' + (label ? ` — ${label}` : '') }
+    return { icon: { Scored: '⚽', Missed: '❌', Retake: '🔁' }[pick(data, 'Outcome', 'outcome')] || '🥅', cls: 'evt-penalty', text: 'Penalty' + (label ? ` — ${label}` : '') }
   }
   if (key === 'var') return { icon: '📺', cls: 'evt-var', text: 'VAR Review' }
   if (key === 'varend') {
     const label = VAR_OUTCOME_LABELS[pick(data, 'Outcome', 'outcome')]
-    return { icon: '📺', cls: 'evt-var', text: 'VAR Decision' + (label ? ` — ${label}` : '') }
+    return { icon: { Stands: '✅', Overturned: '↩️' }[pick(data, 'Outcome', 'outcome')] || '📺', cls: 'evt-var', text: 'VAR Decision' + (label ? ` — ${label}` : '') }
   }
   if (key === 'substitution') return { icon: '🔃', cls: 'evt-sub', text: 'Substitution' }
   if (key === 'kickoff') return { icon: '🏁', cls: 'evt-kickoff', text: 'Kickoff' }
@@ -252,15 +253,18 @@ function describeScoreEvent(d) {
   if (key === 'injury') return { icon: '🩹', cls: 'evt-status', text: 'Injury' }
   if (key === 'suspend') return { icon: '⏹️', cls: 'evt-status', text: 'Suspended' }
   if (key === 'standby') return { icon: '⏳', cls: 'evt-status', text: 'Standby' }
-  if (!action) return { icon: '•', cls: 'evt-generic', text: 'Update' }
-  return { icon: '•', cls: 'evt-generic', text: prettifyAction(action) }
+  const icon = {
+    lineup: '📋', offside: '🚫', foul: '🗣️', save: '🧤', goalkick: '🥅',
+    possession: '⚽', attack: '⚡', dangerousattack: '🔥', clearance: '🛡️',
+    restart: '▶️', resume: '▶️', status: '📡', clock: '⏱️',
+  }[key]
+  return { icon: icon || '📍', cls: 'evt-generic', text: action ? prettifyAction(action) : 'Update' }
 }
 
 const CHIP_HUES = 3  // cycle cyan / violet / teal per price position
 
 // directions is an optional array parallel to prices: 'up' | 'down' | null per index
-function formatPrices(prices, priceNames, directions, fixtureId) {
-  if (!prices || prices.length === 0) return '—'
+function priceLabel(name, index, fixtureId) {
   const fixture = fixturesCache.get(fixtureId)
   const selectionLabels = {
     part1: fixture?.Participant1 || 'Participant 1',
@@ -269,9 +273,13 @@ function formatPrices(prices, priceNames, directions, fixtureId) {
     over: 'Over',
     under: 'Under',
   }
+  return Object.hasOwn(selectionLabels, name) ? selectionLabels[name] : (name || `P${index + 1}`)
+}
+
+function formatPrices(prices, priceNames, directions, fixtureId) {
+  if (!prices || prices.length === 0) return '—'
   return prices.map((p, i) => {
-    const name = priceNames?.[i]
-    const label = esc(Object.hasOwn(selectionLabels, name) ? selectionLabels[name] : (name || `P${i + 1}`))
+    const label = esc(priceLabel(priceNames?.[i], i, fixtureId))
     const val = (p / 1000).toFixed(3)
     const dir = directions && directions[i]
     const arrow = dir === 'up' ? '▲' : dir === 'down' ? '▼' : ''
@@ -281,22 +289,20 @@ function formatPrices(prices, priceNames, directions, fixtureId) {
   }).join('')
 }
 
-const INLINE_EVENTS_LIMIT = 10
-
-// Compact, muted inline preview of a fixture's most recent match events,
-// shown directly under the kickoff/competition line — a quieter version of
-// the same entries the "N match events" link opens in the full side panel
-// (see renderEventsPanel), capped to the last 10 with a timestamp per entry.
-function recentEventsHtml(fid) {
-  const entries = (scoreEvents.get(fid) || []).slice(0, INLINE_EVENTS_LIMIT)
-  if (entries.length === 0) return ''
-  const items = entries.map(e => `
-    <div class="fix-event-entry ${esc(e.cls)}">
-      <span class="event-time">${esc(e.ts)}</span>
-      <span class="event-icon">${e.icon}</span>
-      <span class="event-text">${esc(e.text)}</span>
-    </div>`).join('')
-  return `<div class="fix-recent-events">${items}</div>`
+function fixtureEventsHtml(fid) {
+  const entries = scoreEvents.get(fid) || []
+  if (entries.length === 0) return '<p class="fixture-empty">No match events yet.</p>'
+  const items = entries.map(e => {
+    const [title, detail] = e.text.split(' — ', 2)
+    return `
+      <li class="fix-event-entry ${esc(e.cls)}">
+        <span class="event-icon" aria-hidden="true">${esc(e.icon)}</span>
+        <span class="event-text"><strong>${esc(title)}</strong>${detail ? `<small>${esc(detail)}</small>` : ''}</span>
+        ${e.score ? `<span class="event-score">${esc(e.score)}</span>` : ''}
+        <time class="event-time" title="Update received">${esc(e.ts)}</time>
+      </li>`
+  }).join('')
+  return `<ol class="fix-recent-events">${items}</ol>`
 }
 
 // Renders the 🟨/🟥/🚩 mini-stats row under a fixture's name from a
@@ -339,7 +345,6 @@ let lineOrderCounter = 0
 let lastFlashKey = null
 let flashTimer = null
 let openLineKey = null    // market history panel — set when that panel is open
-let openEventsFid = null  // match-events panel — set when that panel is open
 let searchQuery = ''          // '' = no filter; lowercased substring matched against fixture name
 let totalUpdateCount = 0      // odds updates received across every fixture/market, for the whole session
 
@@ -360,20 +365,15 @@ const historyTitle = document.getElementById('historyTitle')
 const historyList = document.getElementById('historyList')
 const backdrop = document.getElementById('backdrop')
 const historyClose = document.getElementById('historyClose')
-const eventsPanel = document.getElementById('eventsPanel')
-const eventsTitle = document.getElementById('eventsTitle')
-const eventsList = document.getElementById('eventsList')
-const eventsClose = document.getElementById('eventsClose')
 
 function ensureFixture(fid) {
   if (!fixtures.has(fid)) {
     fixtures.set(fid, {
       name: String(fid), competition: '—', kickoff: '—', kickoffTs: null, updated: '', updatedAtMs: null, updateCount: 0, expanded: false,
-      stateCode: null,   // raw GameState (int) or gameState (short code) — see gameStateShort()
-      stateLabel: null,  // human label, e.g. "1st Half" — set only from a live score event; the
-                         // /fixtures snapshot's GameState is stale (often stuck at "Not Started")
-                         // and isn't used here, so no badge shows until real score data arrives
-      isLive: false,     // true while the ball's in play (see LIVE_STATES)
+      eventsExpanded: false,
+      scoreState: null,
+      oddsState: null,
+      inRunning: false,
       scoreText: null,   // "2 – 1", set once a score event with a decodable scoreline arrives
       stats: null,       // { participant1, participant2 } goals/cards/corners breakdown, see scoreBreakdown()
     })
@@ -490,6 +490,13 @@ function compareLines(a, b) {
   return a.order - b.order
 }
 
+function updateLinePrices(line, prices, priceNames) {
+  if (!prices?.length) return
+  line.priceDirs = computeDirections(line, prices)
+  line.pricesData = { prices, priceNames: priceNames || null }
+  line.lastPrices = [...prices]
+}
+
 function computeDirections(line, prices) {
   if (!prices) return null
   if (!line.lastPrices || line.lastPrices.length !== prices.length) return null
@@ -514,6 +521,102 @@ function pushHistory(key, d) {
   if (arr.length > HISTORY_LIMIT) arr.length = HISTORY_LIMIT
 }
 
+const MARKET_TREND_UPDATES = 12
+const ODDS_SERIES_COLORS = ['#38bdf8', '#a5a6f6', '#2dd4bf', '#fbbf24', '#fb7185']
+
+function historyPriceSeries(entries, fixtureId) {
+  const selections = new Map()
+  const directions = entries.map(() => [])
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const entry = entries[index]
+    entry.prices?.forEach((price, position) => {
+      if (!Number.isFinite(price) || price <= 0) return
+      const name = entry.priceNames?.[position]
+      const key = name || position
+      if (!selections.has(key)) {
+        selections.set(key, { name, label: priceLabel(name, position, fixtureId), points: [] })
+      }
+      const { points } = selections.get(key)
+      const previous = points.at(-1)?.price
+      directions[index][position] = previous == null || previous === price
+        ? null : price > previous ? 'up' : 'down'
+      points.push({ index: entries.length - 1 - index, price })
+    })
+  }
+  return { series: [...selections.values()], directions }
+}
+
+function oddsChartLegend(series) {
+  const items = series.map(({ label }, index) =>
+    `<li><span style="--series-color:${ODDS_SERIES_COLORS[index % ODDS_SERIES_COLORS.length]}"></span>${esc(label)}</li>`
+  ).join('')
+  return `<ul class="odds-chart-legend">${items}</ul>`
+}
+
+function oddsChartHtml(series, entries) {
+  if (series.length === 0) return ''
+  return `
+    <figure class="odds-chart">
+      <figcaption>Decimal odds by update</figcaption>
+      ${oddsChartLegend(series)}
+      <canvas width="840" height="302" role="img"
+        aria-label="Decimal odds by update, oldest to newest. The price history below lists the exact values."></canvas>
+      <div class="odds-chart-axis"><span>${esc(entries.at(-1).ts)}</span>${entries.length > 1
+        ? `<span>${esc(entries[0].ts)}</span>` : ''}</div>
+    </figure>`
+}
+
+function drawOddsChart(canvas, series, entryCount, compact = false) {
+  const ctx = canvas?.getContext('2d')
+  if (!ctx) return
+  const prices = series.flatMap(selection => selection.points.map(point => point.price))
+  const min = Math.min(...prices)
+  const max = Math.max(...prices)
+  const padding = Math.max(10, (max - min) * 0.1)
+  const low = Math.max(0, min - padding)
+  const high = max + padding
+  const left = compact ? 10 : 90
+  const right = canvas.width - (compact ? 10 : 16)
+  const top = compact ? 10 : 20
+  const bottom = canvas.height - top
+  const x = index => entryCount === 1 ? (left + right) / 2
+    : left + index * (right - left) / (entryCount - 1)
+  const y = price => bottom - (price - low) * (bottom - top) / (high - low)
+
+  ctx.font = '24px system-ui'
+  ctx.textBaseline = 'middle'
+  ctx.fillStyle = '#a7b3c5'
+  ctx.strokeStyle = 'rgba(148, 163, 184, 0.25)'
+  ctx.lineWidth = 1
+  const gridDivisions = compact ? 2 : 4
+  for (let tick = 0; tick <= gridDivisions; tick++) {
+    const price = low + (high - low) * tick / gridDivisions
+    const row = y(price)
+    if (!compact) ctx.fillText((price / 1000).toFixed(3), 0, row, left - 10)
+    ctx.beginPath()
+    ctx.moveTo(left, row)
+    ctx.lineTo(right, row)
+    ctx.stroke()
+  }
+
+  series.forEach(({ points }, index) => {
+    ctx.strokeStyle = ctx.fillStyle = ODDS_SERIES_COLORS[index % ODDS_SERIES_COLORS.length]
+    ctx.lineWidth = compact ? 3 : 4
+    ctx.lineJoin = 'round'
+    ctx.beginPath()
+    points.forEach((point, position) => {
+      const method = points[position - 1]?.index === point.index - 1 ? 'lineTo' : 'moveTo'
+      ctx[method](x(point.index), y(point.price))
+    })
+    ctx.stroke()
+    for (const point of points) {
+      ctx.beginPath()
+      ctx.arc(x(point.index), y(point.price), compact ? 3 : 5, 0, 2 * Math.PI)
+      ctx.fill()
+    }
+  })
+}
+
 function renderHistoryPanel() {
   if (openLineKey == null) return
   const line = lines.get(openLineKey)
@@ -524,22 +627,23 @@ function renderHistoryPanel() {
     <h2 class="history-title-fixture">${esc(fixtureName)}</h2>
     ${line?.market && line.market !== '—' ? `<p class="history-title-market">${esc(line.market)}</p>` : ''}`
   const entries = history.get(openLineKey) || []
+  const { series, directions } = historyPriceSeries(entries, line?.fixtureId)
   historyList.innerHTML = entries.length === 0
     ? '<p class="fixture-empty">No odds updates yet for this market.</p>'
-    : `<ol class="odds-history-cards">${entries.map((entry, index) => `
+    : `${oddsChartHtml(series, entries)}<ol class="odds-history-cards">${entries.map((entry, index) => `
         <li class="odds-history-card${index === 0 ? ' odds-history-card-latest' : ''}">
           <div class="odds-history-card-header">
             <time>${esc(entry.ts)}</time>
             ${index === 0 ? '<span>Latest update</span>' : ''}
           </div>
           ${entry.prices?.length
-            ? `<div class="fixture-prices">${formatPrices(entry.prices, entry.priceNames, null, line?.fixtureId)}</div>`
+            ? `<div class="fixture-prices">${formatPrices(entry.prices, entry.priceNames, directions[index], line?.fixtureId)}</div>`
             : '<p class="odds-waiting">No prices in this update</p>'}
         </li>`).join('')}</ol>`
+  drawOddsChart(historyList.querySelector?.('canvas'), series, entries.length)
 }
 
 function openMarketPanel(key) {
-  closeEventsPanel()
   openLineKey = key
   historyPanel.classList.add('open')
   backdrop.classList.add('open')
@@ -552,43 +656,6 @@ function closeMarketPanel() {
   backdrop.classList.remove('open')
 }
 
-function renderEventsPanel() {
-  if (openEventsFid == null) return
-  const fx = fixtures.get(openEventsFid)
-  eventsTitle.innerHTML = fx
-    ? `<div class="history-title-fixture">${esc(fx.name)}</div><div class="history-title-market">Match Events</div>`
-    : 'Match Events'
-  const entries = scoreEvents.get(openEventsFid) || []
-  eventsList.innerHTML = entries.length === 0
-    ? `<p class="history-empty">No match events yet.</p>`
-    : entries.map(e => `
-        <div class="history-entry event-entry ${esc(e.cls)}">
-          <span class="h-time">${esc(e.ts)}</span>
-          <span class="event-icon">${e.icon}</span>
-          <span class="event-text">${esc(e.text)}</span>
-        </div>
-      `).join('')
-}
-
-function openEventsPanel(fid) {
-  closeMarketPanel()
-  openEventsFid = fid
-  eventsPanel.classList.add('open')
-  backdrop.classList.add('open')
-  renderEventsPanel()
-}
-
-function closeEventsPanel() {
-  openEventsFid = null
-  eventsPanel.classList.remove('open')
-  backdrop.classList.remove('open')
-}
-
-function closeAllPanels() {
-  closeMarketPanel()
-  closeEventsPanel()
-}
-
 // --- Flash ---
 
 function flash(key) {
@@ -599,6 +666,9 @@ function flash(key) {
 
 // --- Render ---
 
+// Keep recently started fixtures visible while the feed catches up.
+const MATCH_STATUS_GRACE_MS = 150 * 60 * 1000
+const MAX_LIVE_AGE_MS = 6 * 60 * 60 * 1000
 const UPCOMING_WINDOW_MS = 3 * 24 * 60 * 60 * 1000
 const homeTeamOrder = new Intl.Collator('en', { sensitivity: 'base' })
 
@@ -607,18 +677,41 @@ function homeTeamName(fid) {
   return (fixture?.Participant1IsHome === false ? fixture.Participant2 : fixture?.Participant1) || ''
 }
 
+function fixtureState(fix, fx, now) {
+  const kickoff = fix?.StartTime ?? fx?.kickoffTs
+  const canBeLive = Number.isFinite(kickoff) && kickoff >= now - MAX_LIVE_AGE_MS && kickoff <= now
+  const snapshotState = fix?.GameState
+  const code = fx?.scoreState ?? fx?.oddsState ?? snapshotState
+  const label = gameStateLabel(code)
+  if (canBeLive && fx?.inRunning && (!label || label === 'Not Started')) {
+    return { label: 'In Running', short: 'Live', live: true }
+  }
+  if (LIVE_STATES.has(label) && !canBeLive) return { label: null, short: null, live: false }
+  return { label, short: gameStateShort(code), live: LIVE_STATES.has(label) }
+}
+
 function render() {
   const now = Date.now()
   const groups = new Map()
   const fixturesWithOdds = new Set()
+  const liveFixtures = new Set()
+  const pendingStatusFixtures = new Set()
   for (const [fid, fix] of fixturesCache) {
-    if (fix.StartTime >= now && fix.StartTime < now + UPCOMING_WINDOW_MS) {
+    const state = fixtureState(fix, fixtures.get(fid), now)
+    if (state.live) liveFixtures.add(fid)
+    const awaitingStatus = !state.live && (!state.label || state.label === 'Not Started')
+      && fix.StartTime < now && fix.StartTime >= now - MATCH_STATUS_GRACE_MS
+    if (awaitingStatus) pendingStatusFixtures.add(fid)
+    const upcoming = fix.StartTime >= now && fix.StartTime < now + UPCOMING_WINDOW_MS
+    if (state.live || awaitingStatus || upcoming) {
       groups.set(fid, [])
     }
   }
   for (const line of lines.values()) {
     const kickoff = fixtures.get(line.fixtureId)?.kickoffTs
-    if (kickoff != null && kickoff >= now + UPCOMING_WINDOW_MS) continue
+    if (kickoff != null && (kickoff < now - MAX_LIVE_AGE_MS || kickoff >= now + UPCOMING_WINDOW_MS)) {
+      continue
+    }
     if (!groups.has(line.fixtureId)) groups.set(line.fixtureId, [])
     groups.get(line.fixtureId).push(line)
     if (line.pricesData?.prices?.length) fixturesWithOdds.add(line.fixtureId)
@@ -629,8 +722,12 @@ function render() {
       groups.delete(fid)
     }
   }
-  // Sort each odds group by kickoff, then alphabetically by home team.
+  // Sort each section by odds, kickoff and home team.
   const fixtureIds = [...groups.keys()].sort((a, b) => {
+    const liveOrder = Number(liveFixtures.has(b)) - Number(liveFixtures.has(a))
+    if (liveOrder !== 0) return liveOrder
+    const pendingOrder = Number(pendingStatusFixtures.has(b)) - Number(pendingStatusFixtures.has(a))
+    if (pendingOrder !== 0) return pendingOrder
     const oddsOrder = Number(fixturesWithOdds.has(b)) - Number(fixturesWithOdds.has(a))
     if (oddsOrder !== 0) return oddsOrder
     const tsA = fixtures.get(a)?.kickoffTs ?? Infinity
@@ -640,6 +737,9 @@ function render() {
   })
 
   const visibleFixtureIds = fixtureIds.slice(0, fixtureDisplayLimit)
+  const marketTrends = new Map()
+  const liveCards = []
+  const pendingStatusCards = []
   const pricedCards = []
   const waitingCards = []
   for (const fid of visibleFixtureIds) {
@@ -650,15 +750,19 @@ function render() {
     const hasOdds = fixturesWithOdds.has(fid)
     const pricedLines = hasOdds ? groupLines.filter(line => line.pricesData?.prices?.length) : groupLines
     const displayLines = expanded ? groupLines : [pickDefaultLine(pricedLines)]
+    const fullMatch = groupLines.find(line => line.superOddsType === MATCH_ODDS_TYPE && !line.marketPeriod)
+    const trend = fullMatch ? renderMarketTrend(fullMatch, fid, marketTrends) : ''
 
-    const stateShort = fx.stateCode != null ? gameStateShort(fx.stateCode) : null
-    const stateHtml = stateShort
-      ? `<span class="state-badge${fx.isLive ? ' state-live' : ''}" title="${esc(fx.stateLabel || stateShort)}">${fx.isLive ? '<span class="state-dot"></span>' : ''}${esc(stateShort)}</span>`
+    const state = fixtureState(fixturesCache.get(fid), fx, now)
+    const stateHtml = state.short && state.label !== 'Not Started'
+      ? `<span class="state-badge${state.live ? ' state-live' : ''}" title="${esc(state.label)}">${state.live ? '<span class="state-dot"></span>' : ''}${esc(state.short)}</span>`
       : ''
     const scoreHtml = fx.scoreText ? `<span class="fix-score">${esc(fx.scoreText)}</span>` : ''
-    const eventCount = (scoreEvents.get(fid) || []).length
-    const eventsButton = eventCount && !expanded
-      ? `<button type="button" class="fix-events-link card-action" data-events-fid="${fid}">${eventCount} match event${eventCount === 1 ? '' : 's'}</button>`
+    const hasEvents = scoreEvents.has(fid)
+    const showEvents = hasEvents || (fx.kickoffTs != null && fx.kickoffTs <= now)
+    const eventsExpanded = Boolean(fx.eventsExpanded)
+    const eventsButton = showEvents
+      ? `<button type="button" class="fix-events-toggle card-action" data-fid="${fid}" aria-expanded="${eventsExpanded}" aria-controls="fixture-events-${fid}">Match Events</button>`
       : ''
     const expandButton = isExpandable
       ? `<button type="button" class="fix-expand card-action" data-fid="${fid}" aria-expanded="${expanded}" aria-controls="fixture-markets-${fid}">Half markets</button>`
@@ -666,26 +770,33 @@ function render() {
     const markets = displayLines.map((line, index) =>
       renderFixtureMarket(line, fid, index === 0 ? expandButton : '')
     ).join('')
-    const cards = hasOdds ? pricedCards : waitingCards
+    let cards = hasOdds ? pricedCards : waitingCards
+    if (liveFixtures.has(fid)) cards = liveCards
+    if (pendingStatusFixtures.has(fid)) cards = pendingStatusCards
     cards.push(`
       <article class="fixture-card${hasOdds ? ' fixture-card-priced' : ''}">
         <header class="fixture-card-header">
           <div class="fix-sub">${esc(fx.kickoff)} · ${esc(fx.competition)}</div>
           ${stateHtml}
         </header>
-        <h3 class="fix-title">${isRecentlyUpdated(fx) ? '<span class="recent-dot" title="Updated in the last 30s"></span>' : ''}${esc(fx.name)}${scoreHtml}</h3>
+        <div class="fixture-title-row">
+          <h3 class="fix-title">${isRecentlyUpdated(fx) ? '<span class="recent-dot" title="Updated in the last 30s"></span>' : ''}${esc(fx.name)}${scoreHtml}</h3>
+          ${trend}
+        </div>
         ${statsRowHtml(fx.stats)}
         <div class="fixture-markets" id="fixture-markets-${fid}">${markets}</div>
-        ${expanded ? recentEventsHtml(fid) : ''}
         ${eventsButton || fx.updated ? `
           <footer class="fixture-card-footer">
             ${fx.updated ? `<span class="fix-updated">Updated ${esc(fx.updated)} · ${fx.updateCount} update${fx.updateCount === 1 ? '' : 's'}</span>` : ''}
             ${eventsButton}
           </footer>` : ''}
+        ${showEvents ? `<div id="fixture-events-${fid}"${eventsExpanded ? '' : ' hidden'}>${eventsExpanded ? fixtureEventsHtml(fid) : ''}</div>` : ''}
       </article>`)
   }
 
   const sections = [
+    ['In running', liveCards],
+    ['Awaiting match status', pendingStatusCards],
     ['Latest odds', pricedCards],
     ['Awaiting odds', waitingCards],
   ]
@@ -703,10 +814,37 @@ function render() {
   if (html !== lastFixtureHtml) {
     fixtureCards.innerHTML = html
     lastFixtureHtml = html
+    for (const canvas of fixtureCards.querySelectorAll?.('.market-trend') || []) {
+      const { series, count } = marketTrends.get(Number(canvas.dataset.fixtureId))
+      drawOddsChart(canvas, series, count, true)
+    }
   }
   fixtureCountEl.textContent = hasMore
     ? `${visibleFixtureIds.length} of ${fixtureIds.length} fixtures`
     : `${fixtureIds.length} fixture${fixtureIds.length === 1 ? '' : 's'}`
+}
+
+function renderMarketTrend(line, fixtureId, marketTrends) {
+  const entries = (history.get(line.key) || []).slice(0, MARKET_TREND_UPDATES)
+  const { series } = historyPriceSeries(entries, fixtureId)
+  if (!series.some(selection => selection.points.length >= 2)) return ''
+  marketTrends.set(fixtureId, { series, count: entries.length })
+  const participant1IsHome = fixturesCache.get(fixtureId)?.Participant1IsHome !== false
+  const labels = {
+    part1: participant1IsHome ? 'Home' : 'Away',
+    draw: 'Draw',
+    part2: participant1IsHome ? 'Away' : 'Home',
+  }
+  const legend = series.map(selection => ({
+    label: Object.hasOwn(labels, selection.name) ? labels[selection.name] : selection.label,
+  }))
+  return `
+    <div class="fixture-trend">
+      <canvas class="market-trend" width="200" height="68" role="img"
+        aria-label="Recent full-match odds trend, oldest to newest"
+        title="Recent full-match odds" data-fixture-id="${fixtureId}"></canvas>
+      ${oddsChartLegend(legend)}
+    </div>`
 }
 
 function renderFixtureMarket(line, fid, expandButton) {
@@ -762,6 +900,17 @@ async function loadFixtureNames() {
   setTimeout(loadFixtureNames, 30000)
 }
 
+function updateFixtureScore(fx, d) {
+  if (d.gameState) fx.scoreState = d.gameState
+
+  const breakdown = scoreBreakdown(d)
+  if (breakdown) {
+    fx.stats = breakdown
+    fx.scoreText = `${breakdown.participant1.goals} – ${breakdown.participant2.goals}`
+  }
+  return breakdown
+}
+
 function init() {
   loadFixtureNames()
 
@@ -789,18 +938,20 @@ function init() {
       const fx = ensureFixture(fid)
       resolveNameFromCache(fid)
 
+      if (d.InRunning) fx.inRunning = true
+      if (Object.hasOwn(GAME_STATE_BY_CODE, d.GameState) && d.GameState !== 'NS') {
+        fx.oddsState = d.GameState
+      }
+
       const marketSig = marketSignature(d)
       const line = ensureLine(fid, marketSig)
-      const directions = computeDirections(line, d.Prices)
 
       line.superOddsType = d.SuperOddsType
       line.marketParameters = d.MarketParameters || null
       line.marketPeriod = normalizeMarketPeriod(d.MarketPeriod)
       line.market = marketLabel(d)
       line.marketParts = marketParts(d)
-      line.pricesData = { prices: d.Prices || null, priceNames: d.PriceNames || null }
-      line.priceDirs = directions
-      line.lastPrices = d.Prices ? [...d.Prices] : null
+      updateLinePrices(line, d.Prices, d.PriceNames)
       line.updated = timeNow()
       line.updateCount++  // odds updates received for this specific market/line
       fx.updated = line.updated  // fixture-level "last updated across any of its lines"
@@ -829,27 +980,17 @@ function init() {
       const fx = ensureFixture(fid)
       resolveNameFromCache(fid)
 
-      const label = gameStateLabel(d.gameState)
-      if (label) {
-        fx.stateCode = d.gameState
-        fx.stateLabel = label
-        fx.isLive = LIVE_STATES.has(label)
-      }
-
-      const breakdown = scoreBreakdown(d)
-      if (breakdown) {
-        fx.stats = breakdown
-        fx.scoreText = `${breakdown.participant1.goals} – ${breakdown.participant2.goals}`
-      }
+      const breakdown = updateFixtureScore(fx, d)
+      const event = describeScoreEvent(d)
+      if (event.cls === 'evt-goal' && breakdown) event.score = fx.scoreText
 
       if (!scoreEvents.has(fid)) scoreEvents.set(fid, [])
       const arr = scoreEvents.get(fid)
-      arr.unshift({ ts: timeNow(), ...describeScoreEvent(d) })
+      arr.unshift({ ts: timeNow(), ...event })
       if (arr.length > HISTORY_LIMIT) arr.length = HISTORY_LIMIT
 
       fx.updatedAtMs = Date.now()
       render()
-      if (openEventsFid === fid) renderEventsPanel()
     } catch (err) {
       console.warn('Bad scores event:', err)
     }
@@ -868,10 +1009,9 @@ function init() {
   })
 
   historyClose.addEventListener('click', closeMarketPanel)
-  eventsClose.addEventListener('click', closeEventsPanel)
-  backdrop.addEventListener('click', closeAllPanels)
+  backdrop.addEventListener('click', closeMarketPanel)
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeAllPanels()
+    if (e.key === 'Escape') closeMarketPanel()
   })
   fixtureCards.addEventListener('click', (e) => {
     if (e.target.closest('.show-more-fixtures')) {
@@ -884,19 +1024,17 @@ function init() {
       openMarketPanel(historyButton.dataset.lineKey)
       return
     }
-    const eventsLink = e.target.closest('.fix-events-link')
-    if (eventsLink) {
-      e.stopPropagation()
-      openEventsPanel(Number(eventsLink.dataset.eventsFid))
-      return
-    }
-    const expandButton = e.target.closest('.fix-expand')
+    const expandButton = e.target.closest('.fix-expand, .fix-events-toggle')
     if (!expandButton) return
-    const fx = fixtures.get(Number(expandButton.dataset.fid))
+    const fid = Number(expandButton.dataset.fid)
+    const fx = fixtures.get(fid)
     if (!fx) return
-    fx.expanded = !fx.expanded
+    const isEventsToggle = expandButton.classList.contains('fix-events-toggle')
+    const field = isEventsToggle ? 'eventsExpanded' : 'expanded'
+    const selector = isEventsToggle ? '.fix-events-toggle' : '.fix-expand'
+    fx[field] = !fx[field]
     render()
-    fixtureCards.querySelector(`.fix-expand[data-fid="${Number(expandButton.dataset.fid)}"]`)?.focus()
+    fixtureCards.querySelector(`${selector}[data-fid="${fid}"]`)?.focus()
   })
 }
 

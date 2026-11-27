@@ -39,6 +39,7 @@ FIXTURES_REFRESH_INTERVAL = 240  # seconds
 # Send only the fields needed to display and sort fixtures.
 FIXTURE_FIELDS = (
     "FixtureId", "Participant1", "Participant2", "Participant1IsHome", "Competition", "StartTime",
+    "GameState",
 )
 
 

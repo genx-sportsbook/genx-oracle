@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented here.
 
+## [1.1.7] - 2026-11-27
+
+### Added
+
+- Show confirmed in-running fixtures first, with live scores and an expandable
+  match event timeline on each card.
+- Plot price trends in Odds History and highlight increases and decreases.
+  Show a compact full-match odds chart with a Home, Draw, and Away legend
+  beside the fixture name and score.
+
+### Fixed
+
+- Keep recently started fixtures visible while awaiting live status, and
+  guard against stale in-running states using the scheduled kickoff time.
+- Keep the last quoted odds on the card when an update contains no prices.
+
 ## [1.1.6] - 2026-11-26
 
 ### Fixed

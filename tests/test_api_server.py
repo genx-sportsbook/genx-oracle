@@ -23,7 +23,7 @@ FIXTURE_1 = Fixture(
     Ts=1000, StartTime=1781830800000, Competition="Premier League",
     CompetitionId=8, FixtureGroupId=1, Participant1Id=1,
     Participant1="Mexico", Participant2Id=2, Participant2="South Korea",
-    FixtureId=17588223, Participant1IsHome=True,
+    FixtureId=17588223, Participant1IsHome=True, GameState=4,
 )
 
 
@@ -36,6 +36,7 @@ async def test_fixtures_returns_list(app):
     assert len(data) == 1
     assert data[0]["FixtureId"] == 17588223
     assert data[0]["Competition"] == "Premier League"
+    assert data[0]["GameState"] == 4
 
 
 async def test_fixtures_passes_credentials(app):
@@ -214,6 +215,7 @@ async def test_fixtures_trimmed_to_fields_the_dashboard_uses(app):
 
     assert set(r.json()[0]) == {
         "FixtureId", "Participant1", "Participant2", "Participant1IsHome", "Competition", "StartTime",
+        "GameState",
     }
 
 

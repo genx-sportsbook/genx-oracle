@@ -197,8 +197,16 @@ body {
   gap: 8px 12px;
 }
 
-.fix-title {
+.fixture-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin-top: 8px;
+}
+
+.fix-title {
+  flex: 1;
+  min-width: 0;
   font-size: clamp(18px, 2.4vw, 25px);
   font-weight: 700;
   line-height: 1.2;
@@ -339,85 +347,79 @@ body {
   --part-bg: rgba(59, 130, 246, 0.12);
 }
 
-/* Inline preview under the kickoff/competition line — same events as the
-   full match-events panel (.event-entry, below) but deliberately quiet:
-   small, muted, low-contrast, so it reads as ambient detail rather than
-   competing with the fixture name/score/state badge above it. */
 .fix-recent-events {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-top: 6px;
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  list-style: none;
 }
 
 .fix-event-entry {
+  --event-accent: var(--accent-grey);
   display: flex;
-  align-items: baseline;
-  gap: 6px;
-  font-size: 11px;
-  font-weight: normal;
-  color: var(--text-muted);
-  border-left: 2px solid var(--border);
-  padding-left: 8px;
-  opacity: 0.8;
-}
-
-.fix-event-entry .event-time {
-  font-variant-numeric: tabular-nums;
-  opacity: 0.75;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--event-accent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--event-accent) 9%, var(--card-bg));
+  font-size: 13px;
 }
 
 .fix-event-entry .event-icon {
-  opacity: 0.75;
-  filter: saturate(0.6);
+  display: grid;
+  place-items: center;
+  flex: 0 0 30px;
+  height: 30px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--event-accent) 18%, transparent);
+  font-size: 17px;
 }
 
 .fix-event-entry .event-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.fix-event-entry .event-text small {
+  display: block;
+  margin-top: 1px;
   color: var(--text-muted);
 }
 
-/* Same per-category hue as the panel, just muted via the opacity above
-   rather than a second, desaturated color per category. */
-.fix-event-entry.evt-goal { border-left-color: var(--tick-up); }
-.fix-event-entry.evt-yellow { border-left-color: var(--accent-amber); }
-.fix-event-entry.evt-red { border-left-color: var(--tick-down); }
-.fix-event-entry.evt-corner { border-left-color: var(--accent-blue); }
-.fix-event-entry.evt-var { border-left-color: var(--accent-violet); }
-.fix-event-entry.evt-penalty { border-left-color: var(--accent-purple); }
-.fix-event-entry.evt-shot,
-.fix-event-entry.evt-freekick,
-.fix-event-entry.evt-throwin { border-left-color: var(--accent-teal); }
-.fix-event-entry.evt-sub,
-.fix-event-entry.evt-kickoff,
-.fix-event-entry.evt-status,
-.fix-event-entry.evt-generic { border-left-color: var(--accent-grey); }
-
-/* --- Match-events panel entries (reuses .history-entry from the market
-   history panel — see below — with a left accent bar per event type) --- */
-
-.event-entry {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  border-left: 3px solid var(--border);
-  padding-left: 10px;
+.fix-event-entry .event-time,
+.fix-event-entry .event-score {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
-.event-entry .event-text { color: var(--text); }
+.fix-event-entry .event-time {
+  color: var(--text-muted);
+  font-size: 11px;
+}
 
-.event-entry.evt-goal { border-left-color: var(--tick-up); }
-.event-entry.evt-yellow { border-left-color: var(--accent-amber); }
-.event-entry.evt-red { border-left-color: var(--tick-down); }
-.event-entry.evt-corner { border-left-color: var(--accent-blue); }
-.event-entry.evt-var { border-left-color: var(--accent-violet); }
-.event-entry.evt-penalty { border-left-color: var(--accent-purple); }
-.event-entry.evt-shot,
-.event-entry.evt-freekick,
-.event-entry.evt-throwin { border-left-color: var(--accent-teal); }
-.event-entry.evt-sub,
-.event-entry.evt-kickoff,
-.event-entry.evt-status,
-.event-entry.evt-generic { border-left-color: var(--accent-grey); }
+.fix-event-entry .event-score {
+  color: var(--event-accent);
+  font-weight: 700;
+}
+
+.fix-event-entry.evt-goal { --event-accent: var(--tick-up); }
+.fix-event-entry.evt-goal strong { color: var(--event-accent); }
+.fix-event-entry.evt-yellow { --event-accent: var(--accent-amber); }
+.fix-event-entry.evt-red { --event-accent: var(--tick-down); }
+.fix-event-entry.evt-corner { --event-accent: var(--accent-blue); }
+.fix-event-entry.evt-var { --event-accent: var(--accent-violet); }
+.fix-event-entry.evt-penalty { --event-accent: var(--accent-purple); }
+.fix-event-entry.evt-shot,
+.fix-event-entry.evt-freekick,
+.fix-event-entry.evt-throwin { --event-accent: var(--accent-teal); }
+.fix-event-entry.evt-sub,
+.fix-event-entry.evt-kickoff { --event-accent: var(--accent-cyan); }
 
 /* --- Card odds and actions --- */
 
@@ -503,7 +505,8 @@ body {
   gap: 4px 12px;
 }
 
-.fix-expand[aria-expanded="true"] {
+.fix-expand[aria-expanded="true"],
+.fix-events-toggle[aria-expanded="true"] {
   color: var(--odds-accent);
 }
 
@@ -687,6 +690,88 @@ body {
 
 .odds-history-panel .history-list {
   padding: 16px clamp(14px, 4vw, 24px) 24px;
+}
+
+.odds-chart {
+  margin: 0 0 14px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card-bg);
+}
+
+.odds-chart figcaption {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.odds-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 14px;
+  margin: 8px 0 10px;
+  padding: 0;
+  list-style: none;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.odds-chart-legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.odds-chart-legend li span {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--series-color);
+}
+
+.fixture-trend {
+  flex: 0 0 auto;
+  width: 96px;
+}
+
+.market-trend {
+  display: block;
+  width: clamp(60px, 8vw, 92px);
+  height: auto;
+  margin-inline: auto;
+}
+
+.fixture-trend .odds-chart-legend {
+  justify-content: center;
+  gap: 2px 4px;
+  margin: 2px 0 0;
+  font-size: 9px;
+  line-height: 1.2;
+}
+
+.fixture-trend .odds-chart-legend li {
+  gap: 2px;
+}
+
+.fixture-trend .odds-chart-legend li span {
+  flex: 0 0 5px;
+  height: 5px;
+}
+
+.odds-chart canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.odds-chart-axis {
+  display: flex;
+  justify-content: space-between;
+  padding-inline: 11% 2%;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .odds-history-cards {
