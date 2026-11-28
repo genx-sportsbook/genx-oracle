@@ -1,3 +1,6 @@
+{{- if ne (int .Values.replicaCount) 1 }}
+{{- fail "txline-server requires one replica for its local SQLite ingester" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -6,6 +9,8 @@ metadata:
     {{- include "txline-server.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "txline-server.selectorLabels" . | nindent 6 }}
@@ -17,24 +22,23 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
+        fsGroup: 1000
       containers:
         - name: txline-server
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: TXLINE_DATABASE
+              value: /app/data/txline.sqlite3
           ports:
             - containerPort: 8000
               protocol: TCP
           volumeMounts:
-            - name: credentials
-              mountPath: /app/credentials
-              readOnly: true
+            - name: data
+              mountPath: /app/data
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          # All three probes hit /healthz, which is process-local and does no
-          # upstream work. They used to point at /fixtures, which fetches and
-          # parses ~68MB of the global fixture catalog — measured at ~9s cold,
-          # well past the old timeoutSeconds: 10 — so the probe itself was what
-          # flapped the pod out of the endpoints list.
+          # Probes only check the web process and its local database.
           startupProbe:
             httpGet:
               path: /healthz
@@ -55,7 +59,30 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
+        - name: txline-ingest
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: TXLINE_DATABASE
+              value: /app/data/txline.sqlite3
+          command: ["txline-ingest"]
+          args: ["--credentials", "/app/credentials/.txline-credentials.json"]
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            - name: credentials
+              mountPath: /app/credentials
+              readOnly: true
+          resources:
+            {{- toYaml .Values.ingestResources | nindent 12 }}
       volumes:
+        - name: data
+          {{- if or .Values.persistence.enabled .Values.persistence.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default (include "txline-server.fullname" .) }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
         - name: credentials
           secret:
             secretName: {{ .Values.credentials.existingSecret | default (printf "%s-credentials" (include "txline-server.fullname" .)) }}

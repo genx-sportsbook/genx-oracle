@@ -9,7 +9,8 @@ Python client and server for the [TxLINE API](https://txline-docs.txodds.com) â€
 | `txline-subscribe` | One-time wallet setup â€” activates your on-chain subscription and stores credentials locally |
 | `txline-stream` | CLI for tailing live SSE streams (odds, scores) or fetching fixture snapshots |
 | `txline-watch` | Live terminal dashboard combining odds + scores streams (Rich.Live TUI) |
-| `txline-server` | FastAPI SSE proxy + browser dashboard served at `/` |
+| `txline-ingest` | Collects TxLINE fixtures, odds, and scores into SQLite |
+| `txline-server` | Serves the browser dashboard and streams stored data from SQLite |
 
 ## Requirements
 
@@ -42,12 +43,22 @@ python3 -m venv .venv
 
 .venv/bin/txline-watch                          # terminal dashboard (odds + scores)
 
-.venv/bin/txline-server                         # browser dashboard + SSE API at http://localhost:8000
+./scripts/run-local.sh                        # start the ingester and dashboard together
 ```
 
-Open `http://localhost:8000` for the live browser dashboard.
+Open `http://127.0.0.1:8000` after the ingester logs `Refreshed N fixtures`.
+Press Ctrl+C to stop both processes. Use `TXLINE_PORT=8001 ./scripts/run-local.sh`
+if port 8000 is occupied, or run the script with `--help` for other settings.
 
-On an upstream HTTP 401, `txline-server` refreshes the guest JWT in memory
+To run the processes independently, open separate terminals and use
+`.venv/bin/python -m txline.ingest` and `.venv/bin/python -m txline.api.server`.
+Both commands default to `txline.sqlite3` in the working directory. Set `TXLINE_DATABASE` or
+pass `--database` to both commands to use another path. The web server needs
+access to the database directory and can start before the first fixture snapshot.
+The ingester loads recent Match Odds history for fixtures on the board in the
+background, so previous quotes can appear while it waits for new live updates.
+
+On an upstream HTTP 401, `txline-ingest` refreshes the guest JWT in memory
 and retries with the existing API token. The credentials mount stays read-only.
 If TxLINE rejects the API token or the subscription expires, check the
 subscription and update the credentials Secret with a valid pair.
@@ -57,9 +68,12 @@ subscription and update the credentials Secret with a valid pair.
 
 ```bash
 docker build -t txline-server .
-docker run -p 8000:8000 \
+docker volume create txline-data
+docker run -d --name txline-ingest --entrypoint txline-ingest \
+  -v txline-data:/app/data \
   -v /path/to/.txline-credentials.json:/app/credentials/.txline-credentials.json:ro \
-  txline-server
+  txline-server --credentials /app/credentials/.txline-credentials.json
+docker run --rm -p 8000:8000 -v txline-data:/app/data txline-server
 ```
 
 ## Kubernetes
@@ -68,12 +82,19 @@ docker run -p 8000:8000 \
 helm repo add txline https://genx-sportsbook.github.io/genx-oracle
 helm repo update
 helm install txline-server txline/txline-server \
-  --version 1.0.0 \
   --set credentials.existingSecret=txline-credentials \
   --set ingress.host=txline.example.com
 ```
 
-See `CLAUDE.md` for the full Helm chart reference and release process.
+The ingester-enabled chart runs one web container and one ingester in the same pod, with a
+shared persistent volume. The cluster needs a default storage class or an existing
+claim set through `persistence.existingClaim`. Set `persistence.enabled=false`
+for a temporary database whose contents last for the life of the pod. Use
+storage that supports local SQLite WAL file locking. If installing this chart
+from source before its first release, set `image.tag` to an image built from
+the same source revision.
+
+See `CLAUDE.md` for the Helm chart reference and release process.
 
 ## Development
 

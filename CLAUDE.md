@@ -34,7 +34,8 @@ python3 -m venv .venv
 .venv/bin/txline-watch --fixture-id 12345        # filter to one fixture
 
 # Server (FastAPI SSE proxy + web dashboard at http://localhost:8000)
-.venv/bin/txline-server                          # start on 0.0.0.0:8000
+.venv/bin/txline-ingest                          # ingest into ./txline.sqlite3
+.venv/bin/txline-server                          # separate terminal, start on 0.0.0.0:8000
 .venv/bin/txline-server --port 9000              # custom port
 
 # Wallet helpers (scripts run directly, not entry points)
@@ -46,41 +47,42 @@ python3 -m venv .venv
 
 The credential lifecycle is:
 1. **One-time setup** — `txline-subscribe` generates a guest JWT, submits a zero-cost on-chain `subscribe` transaction, NaCl-signs the activation message with the wallet key, and POSTs to `/api/token/activate`. The resulting `{jwt, api_token}` pair is persisted to `.txline-credentials.json`.
-2. **Runtime** — `TxLineClient` loads credentials from that file and uses `Authorization: Bearer {jwt}` + `X-Api-Token: {api_token}` on every request. On upstream HTTP 401, `txline-server` checks for a replacement credentials file or obtains a fresh guest JWT from `/auth/guest/start` and retries once with the existing API token. Fixture refresh and both streams share this recovery. The fresh JWT is held in process memory.
+2. **Runtime** — `TxLineClient` loads credentials from that file and uses `Authorization: Bearer {jwt}` + `X-Api-Token: {api_token}` on every request. On upstream HTTP 401, `txline-ingest` checks for a replacement credentials file or obtains a fresh guest JWT from `/auth/guest/start` and retries once with the existing API token. Fixture refresh and both streams share this recovery. The fresh JWT is held in process memory.
 
 **SSE streaming** (`txline/streams/`) uses `httpx-sse`. Both streams (`/api/odds/stream`, `/api/scores/stream`) support optional `fixtureId` filtering and reconnect via `Last-Event-ID`. Streams yield typed Pydantic models (`OddsUpdate | Heartbeat`, `ScoreUpdate | Heartbeat`).
 
 **`txline-watch`** (`txline/cli/watch.py`) fans odds and scores SSE streams into an `asyncio.Queue`, applies events to a `dict[int, FixtureState]` via `apply_event`, and renders a `Rich.Live` table via `build_table`. Fixture names are resolved lazily from a one-shot REST snapshot fetch. Prices are stored as integers and displayed as decimal odds (÷ 1000).
 
-**`txline-server`** (`txline/api/server.py`) is a FastAPI app that proxies the three TxLINE endpoints (`GET /fixtures`, `GET /odds/stream`, `GET /scores/stream`), exposes `GET /healthz`, and serves a vanilla JS browser dashboard at `/`.
+**`txline-ingest`** (`txline/ingest.py`) owns the TxLINE credentials, the fixture
+refresh, and one SSE connection per feed. It verifies the Premier League
+competition ID (8) before storing the serialized fixture snapshot, and filters
+stored odds to Match Odds and their available periods. A separate background
+task fetches the per-fixture odds archive for recently started fixtures and
+those kicking off in the next 72 hours. Archived and live messages deduplicate
+by fixture and message ID, and the dashboard orders quotes by source time.
+On an upstream outage the
+ingester retains the previous snapshot and retries.
 
-`/fixtures` is the expensive one: `get_fixtures_window` pulls two day-buckets of the *global* fixture catalog (~34MB each, ~230k records), which measures ~5s on the wire plus ~2s of Pydantic validation and peaks around 600MB RSS. Three things keep that off the request path:
+**`FeedStore`** (`txline/store.py`) uses SQLite WAL on a shared filesystem volume.
+The ingester is the writer and the web process opens read-only connections. The
+serialized fixture response and membership are updated in one transaction.
+History is pruned to the latest 50 updates per odds market or score feed per
+fixture, with the latest quote and scoreline retained through updates without values. Fixture refresh removes history for fixtures outside the cached window.
 
-- **`FixturesCache` caches the serialized bytes, not the models.** FastAPI re-encoding ~116k `Fixture` models cost ~3.2s of synchronous CPU on *every* call — which on single-worker uvicorn also stalls the SSE streams sharing that event loop. Encoding once per refresh makes a cache hit ~1ms.
-- **A background task refreshes every 240s** (ahead of the 300s TTL) so no browser request ever blocks on a cold fetch. It is deliberately *not* awaited during startup — the app must bind and serve immediately. A stale body is served as-is rather than refetched inline, and a failed refresh keeps the previous copy instead of erroring.
-- **The response is trimmed to the five fields the dashboard reads** (`FixtureId`, `Participant1`, `Participant2`, `Competition`, `StartTime` — see `resolveNameFromCache()` in `app.js`), halving it from 34MB to 16MB.
+**`txline-server`** (`txline/api/server.py`) serves the dashboard at `/`, reads
+the serialized snapshot for `/fixtures`, and tails the SQLite event log through
+`/odds/stream` and `/scores/stream`. The browser replays retained history on
+load and resumes from its SSE `Last-Event-ID` on reconnect. The web server
+opens no TxLINE connections and can serve retained data during an upstream
+outage. All Kubernetes probes point to `/healthz`, which only checks the local
+web process and reports whether the stored fixture snapshot is fresh.
 
-The cold-start path is single-flight via a lock *re-checked inside the lock*; checking `self._body is None` only before acquiring it serializes the herd without deduplicating it, so every concurrent caller still ran its own 68MB fetch.
-
-**`/healthz`** is process-local and does no upstream work. This matters: all three Kubernetes probes point at it. The readiness probe used to target `/fixtures` with `timeoutSeconds: 10` against a ~9s cold response, so the probe itself was what flapped the pod out of the endpoints list — the pod went not-ready under no load at all. Never point a probe at `/fixtures`.
-
-Static files live in `txline/api/static/` (`index.html`, `app.js`, `style.css`), mounted via `StaticFiles`; a `no_cache` middleware forces `Cache-Control: no-store` on every response so edits to `app.js`/`style.css` are always picked up without a hard refresh (`StaticFiles` alone only sends `Last-Modified`/`ETag`, which Chrome/Safari can serve stale from heuristic cache). CORS is open (`allow_origins=["*"]`).
-
-The browser dashboard ("GENX-SPORTSBOOK" in the topbar — styled to match the genx-sportsbook.com logo, `Black Ops One` font with a cyan/pink split, name only) fetches `/fixtures` on load for name/competition resolution, then opens two `EventSource` connections and updates a live table, one row-group per fixture:
-
-- **State model** — two `Map`s: `fixtures` (per-fixture metadata: name, competition, kickoff, `kickoffTs`, last-updated, update count) and `lines` (per-market data, keyed by `` `${fixtureId}::${marketSignature}` ``, where `marketSignature` combines the market type, parameters, and normalized period). This split lets one fixture track several concurrent markets (Match Odds, Asian Handicap, Over/Under, 1st/2nd half variants) without one overwriting another.
-- **Fixture ordering** — the fixture list sorts by `kickoffTs` ascending (soonest kickoff first); fixtures whose kickoff hasn't resolved yet sort to the bottom instead of jumbling in at `0`.
-- **Market ordering within a fixture** — `compareLines()` sorts an expanded fixture's markets into a fixed order: Match Odds first, then Asian Handicap, then Over/Under (`MARKET_TYPE_ORDER`), each ranked by numeric line ascending (parsed from the raw `MarketParameters` string via `lineParamValue()`), full-match before per-half periods, unrecognized types last, first-seen order as the final tiebreak. This replaced a naive first-seen (insertion order) sort, which made the market list jump around as updates arrived in arbitrary order.
-- **Market names** — `SuperOddsType`, `MarketParameters`, and `MarketPeriod` carry vendor codes. The dashboard labels known types and periods, and normalizes an explicit `fulltime` period to the same market identity as a missing period.
-- **Market chip display** — each market renders as three separate colored boxes rather than one flattened string: type (bold purple), line/param (blue), period (grey) — built by `marketParts()`/`formatMarketChip()`.
-- **Default line per fixture** — collapsed rows show one market via `pickDefaultLine()`, which prefers the full-match Match Odds line (`SuperOddsType === '1X2_PARTICIPANT_RESULT' && !marketPeriod`) over any other line, falling back to the most recently updated one. Matching only on `SuperOddsType` without excluding `marketPeriod` was a real bug — it let a 1st-half Match Odds line win over the full-match one. Clicking a fixture expands it to show every tracked line.
-- **Tick highlighting** — a line's up/down flash (`chip-up`/`chip-down`) persists until that line's *next* update recomputes direction; there is no timeout that clears it early.
-- **Odds display** — prices are stored as integers and always rendered to 3 decimal places (`(price / 1000).toFixed(3)`), in both the main table and the history panel.
-- **Competition filter** — a hand-built dropdown (`div`/`ul[role=listbox]`, not a native `<select>`) in the top bar filters the table to one competition. It's custom-built rather than a native `<select>` because Chrome/Safari on macOS hand the open `<select>` list off to the OS to render, so it can't be themed there (only Firefox lets CSS reach it); the custom version renders identically everywhere and supports click, keyboard (arrows/Enter/Escape), and click-outside-to-close.
-- **Update counters** — the topbar shows a running total of odds updates received this session (`totalUpdateCount`); when a competition is selected in the dropdown, it switches to that competition's own count instead (tracked per-competition in `competitionUpdateCounts`, via `updateTotalUpdatesDisplay()`).
-- **History panel** — scoped per-market (keyed by the same `lineKey`, not per-fixture), opened by clicking a market chip in the main table.
-
-SSE events use named types (`event: odds`, `event: scores`, `event: heartbeat`).
+The browser dashboard tracks fixture metadata and live score state by fixture
+ID, and odds by fixture, market type, parameters, and normalized period. It
+builds its odds history, price trends, and match events from the SSE replay
+and live updates. Vendor prices are integers and are displayed divided by 1000.
+The dashboard assets live under `txline/api/static/`, and responses use
+`Cache-Control: no-store` so asset edits take effect on the next page load.
 
 **The on-chain `subscribe` transaction** (`txline/subscription.py`) is hand-built with `solders` rather than through `anchorpy`'s `Program`/`Idl` — the deployed program (`txodds/tx-oracle`) publishes a modern-format Anchor IDL that `anchorpy` (0.21.0, latest on PyPI) cannot parse, and the program has no on-chain IDL account at all, so there is nothing to fetch at runtime regardless. The account list and PDA seeds (`pricing_matrix`, `token_treasury_v2`) are read straight from `programs/txoracle/src/instructions/subscriptions/subscribe.rs` in that repo. TxL is a Token-2022 mint, so ATAs must be derived with `TOKEN_2022_PROGRAM_ID`, not the legacy Token program.
 
@@ -95,17 +97,10 @@ SSE events use named types (`event: odds`, `event: scores`, `event: heartbeat`).
 
 ## Container image
 
-The `Dockerfile` at the repo root builds `txline-server` as a non-root container image.
-
-```bash
-# Build locally
-docker build -t txline-server .
-
-# Run with credentials mounted
-docker run -p 8000:8000 \
-  -v /path/to/.txline-credentials.json:/app/credentials/.txline-credentials.json:ro \
-  txline-server
-```
+The `Dockerfile` builds one non-root image with both executables. Its default
+entry point is `txline-server`. The ingester uses `--entrypoint txline-ingest`
+with Docker or a command override in Kubernetes. Both processes use a shared
+`/app/data/txline.sqlite3` by default. See the Docker example in `README.md`.
 
 GitHub Actions (`.github/workflows/docker.yml`) builds and pushes to `ghcr.io/genx-sportsbook/txline-server`. It's `workflow_dispatch`-only (no automatic push trigger) — run it manually from the Actions tab, from the branch or tag you want to build:
 - Run from a `v*.*.*` tag → that version only (e.g. `:1.0.0`) — this is the tag the Helm chart deploys, see below
@@ -116,7 +111,11 @@ Earlier versions of this workflow also pushed `:latest` on every run, including 
 
 ## Kubernetes / Helm
 
-The Helm chart lives at `helm/txline-server/`. Credentials are injected as a Kubernetes Secret. `image.tag` defaults to the chart's `appVersion`, so the examples below only pass it to pin something different from the chart being installed.
+The Helm chart lives at `helm/txline-server/`. The ingester receives the
+credentials Secret read-only. One pod runs both processes with a shared
+ReadWriteOnce volume. Use `persistence.existingClaim` for an existing claim,
+`persistence.storageClass` to choose the storage class, or
+`persistence.enabled=false` to use an ephemeral volume. `image.tag` defaults to the chart's `appVersion`, so the examples below only pass it to pin something different from the chart being installed.
 
 `resources` defaults to a 512Mi request / 1Gi limit. Don't lower the limit below ~700Mi: a fixture refresh transiently holds ~68MB of JSON and ~230k Pydantic models, peaking near 600MB, and a limit under that peak OOM-kills the pod mid-refresh in a restart loop.
 

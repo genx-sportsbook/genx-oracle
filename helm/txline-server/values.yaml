@@ -1,3 +1,4 @@
+# SQLite has one ingester and one web container on the same node.
 replicaCount: 1
 
 image:
@@ -9,11 +10,24 @@ image:
   tag: ""
   pullPolicy: IfNotPresent
 
+persistence:
+  enabled: true
+  existingClaim: ""
+  storageClass: ""
+  size: 1Gi
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 256Mi
+
 # A fixture-catalog refresh transiently parses ~68MB of JSON into ~230k
 # Pydantic models, peaking around 600MB RSS. With no request set the pod can
 # land on a node with nothing left to give it; with a limit below that peak
 # it gets OOM-killed mid-refresh and restarts. Size the limit above the peak.
-resources:
+ingestResources:
   requests:
     cpu: 200m
     memory: 512Mi

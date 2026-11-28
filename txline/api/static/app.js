@@ -285,7 +285,8 @@ function formatPrices(prices, priceNames, directions, fixtureId) {
     const arrow = dir === 'up' ? '▲' : dir === 'down' ? '▼' : ''
     const dirClass = dir ? ` chip-${dir}` : ''
     const hue = i % CHIP_HUES
-    return `<span class="chip chip-${hue}${dirClass}"><span class="chip-label">${label}</span><span class="chip-value">${arrow}${val}</span></span>`
+    const valueClass = val.length > 7 ? ' chip-value-long' : ''
+    return `<span class="chip chip-${hue}${dirClass}"><span class="chip-label">${label}</span><span class="chip-value${valueClass}">${arrow}${val}</span></span>`
   }).join('')
 }
 
@@ -318,8 +319,12 @@ function statsRowHtml(stats) {
   return parts.length ? `<div class="fix-stats">${parts.join('')}</div>` : ''
 }
 
-function timeNow() {
-  const now = new Date()
+function oddsUpdateLabel(count) {
+  return `${count} odds update${count === 1 ? '' : 's'}`
+}
+
+function timeNow(timestamp = Date.now()) {
+  const now = new Date(timestamp)
   return [now.getHours(), now.getMinutes(), now.getSeconds()]
     .map(n => n.toString().padStart(2, '0'))
     .join(':')
@@ -345,8 +350,8 @@ let lineOrderCounter = 0
 let lastFlashKey = null
 let flashTimer = null
 let openLineKey = null    // market history panel — set when that panel is open
+let lastOddsUpdateMs = 0
 let searchQuery = ''          // '' = no filter; lowercased substring matched against fixture name
-let totalUpdateCount = 0      // odds updates received across every fixture/market, for the whole session
 
 const fixtureCards = document.getElementById('fixtureCards')
 let fixtureSnapshotLoaded = false
@@ -371,6 +376,7 @@ function ensureFixture(fid) {
     fixtures.set(fid, {
       name: String(fid), competition: '—', kickoff: '—', kickoffTs: null, updated: '', updatedAtMs: null, updateCount: 0, expanded: false,
       eventsExpanded: false,
+      oddsTs: null,
       scoreState: null,
       oddsState: null,
       inRunning: false,
@@ -420,6 +426,8 @@ function ensureLine(fid, marketSig) {
       priceDirs: null,        // array parallel to prices.prices — cleared/replaced on the line's next update, not on a timer
       lastPrices: null,
       updated: '',
+      oddsTs: null,
+      quoteTs: null,
       updateCount: 0,  // odds updates received for this specific market/line
     })
   }
@@ -440,7 +448,11 @@ const PRIMARY_MARKET_TYPES = new Set([MATCH_ODDS_TYPE, 'MONEYLINE_PARTICIPANT_RE
 function pickDefaultLine(groupLines) {
   const mainLine = groupLines.find(l => PRIMARY_MARKET_TYPES.has(l.superOddsType) && !l.marketPeriod)
   if (mainLine) return mainLine
-  return groupLines.reduce((latest, l) => (!latest || l.updated > latest.updated) ? l : latest, null)
+  return groupLines.reduce((latest, line) => {
+    if (!latest) return line
+    const order = (line.oddsTs ?? 0) - (latest.oddsTs ?? 0)
+    return (order || line.updated.localeCompare(latest.updated)) > 0 ? line : latest
+  }, null)
 }
 
 // Expanded-fixture market order: Match Odds/Moneyline first, then handicap,
@@ -510,14 +522,25 @@ function computeDirections(line, prices) {
 
 // --- History ---
 
+function oddsTime(timestamp) {
+  const time = timeNow(timestamp)
+  const date = new Date(timestamp)
+  if (date.toDateString() === new Date().toDateString()) return time
+  return `${date.toLocaleDateString('en', { day: 'numeric', month: 'short' })} ${time}`
+}
+
 function pushHistory(key, d) {
   if (!history.has(key)) history.set(key, [])
   const arr = history.get(key)
-  arr.unshift({
-    ts: timeNow(),
+  const sourceTs = d.Ts ?? d.receivedAt ?? Date.now()
+  const entry = {
+    sourceTs,
+    ts: oddsTime(sourceTs),
     prices: d.Prices,
     priceNames: d.PriceNames,
-  })
+  }
+  const index = arr.findIndex(previous => previous.sourceTs <= sourceTs)
+  arr.splice(index < 0 ? arr.length : index, 0, entry)
   if (arr.length > HISTORY_LIMIT) arr.length = HISTORY_LIMIT
 }
 
@@ -787,7 +810,7 @@ function render() {
         <div class="fixture-markets" id="fixture-markets-${fid}">${markets}</div>
         ${eventsButton || fx.updated ? `
           <footer class="fixture-card-footer">
-            ${fx.updated ? `<span class="fix-updated">Updated ${esc(fx.updated)} · ${fx.updateCount} update${fx.updateCount === 1 ? '' : 's'}</span>` : ''}
+            ${fx.updated ? `<span class="fix-updated">Updated ${esc(fx.updated)} · ${oddsUpdateLabel(fx.updateCount)}</span>` : ''}
             ${eventsButton}
           </footer>` : ''}
         ${showEvents ? `<div id="fixture-events-${fid}"${eventsExpanded ? '' : ' hidden'}>${eventsExpanded ? fixtureEventsHtml(fid) : ''}</div>` : ''}
@@ -819,6 +842,10 @@ function render() {
       drawOddsChart(canvas, series, count, true)
     }
   }
+  const visibleUpdateCount = visibleFixtureIds.reduce(
+    (count, fid) => count + (fixtures.get(fid)?.updateCount ?? 0), 0,
+  )
+  totalUpdatesEl.textContent = `${oddsUpdateLabel(visibleUpdateCount)} on shown cards`
   fixtureCountEl.textContent = hasMore
     ? `${visibleFixtureIds.length} of ${fixtureIds.length} fixtures`
     : `${fixtureIds.length} fixture${fixtureIds.length === 1 ? '' : 's'}`
@@ -873,7 +900,7 @@ function tickClock() {
 
 function setStatus(s) {
   statusDotEl.className = 'dot' + (s === 'live' ? ' live' : s === 'connecting' ? '' : ' reconnecting')
-  statusTextEl.textContent = s
+  statusTextEl.textContent = s === 'live' ? 'Odds feed live' : s
 }
 
 // --- Startup ---
@@ -911,6 +938,64 @@ function updateFixtureScore(fx, d) {
   return breakdown
 }
 
+let feedRenderPending = false
+let historyRenderPending = false
+
+function scheduleFeedRender(refreshHistory = false) {
+  historyRenderPending ||= refreshHistory
+  if (feedRenderPending) return
+  feedRenderPending = true
+  requestAnimationFrame(() => {
+    feedRenderPending = false
+    render()
+    if (historyRenderPending) renderHistoryPanel()
+    historyRenderPending = false
+  })
+}
+
+function applyOddsUpdate(d) {
+  const fid = d.FixtureId
+  const fx = ensureFixture(fid)
+  resolveNameFromCache(fid)
+  const receivedAt = d.archived ? d.Ts : (d.receivedAt ?? Date.now())
+  const sourceTs = d.Ts ?? receivedAt
+  const updated = oddsTime(sourceTs)
+
+  if (fx.oddsTs == null || sourceTs >= fx.oddsTs) {
+    fx.oddsTs = sourceTs
+    fx.updated = updated
+    if (d.InRunning) fx.inRunning = true
+    if (Object.hasOwn(GAME_STATE_BY_CODE, d.GameState) && d.GameState !== 'NS') {
+      fx.oddsState = d.GameState
+    }
+  }
+
+  const line = ensureLine(fid, marketSignature(d))
+  line.superOddsType = d.SuperOddsType
+  line.marketParameters = d.MarketParameters || null
+  line.marketPeriod = normalizeMarketPeriod(d.MarketPeriod)
+  line.market = marketLabel(d)
+  line.marketParts = marketParts(d)
+  if (line.oddsTs == null || sourceTs >= line.oddsTs) {
+    line.oddsTs = sourceTs
+    line.updated = updated
+  }
+  if (d.Prices?.length && (line.quoteTs == null || sourceTs >= line.quoteTs)) {
+    updateLinePrices(line, d.Prices, d.PriceNames)
+    line.quoteTs = sourceTs
+  }
+
+  line.updateCount++
+  fx.updatedAtMs = Math.max(fx.updatedAtMs ?? 0, receivedAt)
+  fx.updateCount++
+  if (sourceTs >= lastOddsUpdateMs) {
+    lastOddsUpdateMs = sourceTs
+    lastUpdateEl.textContent = `Updated ${updated}`
+  }
+  pushHistory(line.key, d)
+  return line
+}
+
 function init() {
   loadFixtureNames()
 
@@ -933,38 +1018,11 @@ function init() {
   oddsEs.addEventListener('odds', (e) => {
     try {
       const d = JSON.parse(e.data)
-      markLive()
-      const fid = d.FixtureId
-      const fx = ensureFixture(fid)
-      resolveNameFromCache(fid)
-
-      if (d.InRunning) fx.inRunning = true
-      if (Object.hasOwn(GAME_STATE_BY_CODE, d.GameState) && d.GameState !== 'NS') {
-        fx.oddsState = d.GameState
+      const line = applyOddsUpdate(d)
+      if (!d.archived && Date.now() - (d.receivedAt ?? Date.now()) < RECENT_UPDATE_WINDOW_MS) {
+        flash(line.key)
       }
-
-      const marketSig = marketSignature(d)
-      const line = ensureLine(fid, marketSig)
-
-      line.superOddsType = d.SuperOddsType
-      line.marketParameters = d.MarketParameters || null
-      line.marketPeriod = normalizeMarketPeriod(d.MarketPeriod)
-      line.market = marketLabel(d)
-      line.marketParts = marketParts(d)
-      updateLinePrices(line, d.Prices, d.PriceNames)
-      line.updated = timeNow()
-      line.updateCount++  // odds updates received for this specific market/line
-      fx.updated = line.updated  // fixture-level "last updated across any of its lines"
-      fx.updatedAtMs = Date.now()
-      fx.updateCount++  // total odds updates received for this fixture, across all its markets
-      totalUpdateCount++  // total odds updates received across every fixture/market
-      lastUpdateEl.textContent = `Updated ${fx.updated}`
-      totalUpdatesEl.textContent = `${totalUpdateCount} update${totalUpdateCount === 1 ? '' : 's'}`
-
-      pushHistory(line.key, d)
-      flash(line.key)
-      render()
-      if (openLineKey === line.key) renderHistoryPanel()
+      scheduleFeedRender(openLineKey === line.key)
     } catch (err) {
       console.warn('Bad odds event:', err)
     }
@@ -986,11 +1044,11 @@ function init() {
 
       if (!scoreEvents.has(fid)) scoreEvents.set(fid, [])
       const arr = scoreEvents.get(fid)
-      arr.unshift({ ts: timeNow(), ...event })
+      arr.unshift({ ts: timeNow(d.receivedAt), ...event })
       if (arr.length > HISTORY_LIMIT) arr.length = HISTORY_LIMIT
 
-      fx.updatedAtMs = Date.now()
-      render()
+      fx.updatedAtMs = Math.max(fx.updatedAtMs ?? 0, d.receivedAt ?? Date.now())
+      scheduleFeedRender()
     } catch (err) {
       console.warn('Bad scores event:', err)
     }

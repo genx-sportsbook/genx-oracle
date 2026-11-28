@@ -207,7 +207,7 @@ body {
 .fix-title {
   flex: 1;
   min-width: 0;
-  font-size: clamp(18px, 2.4vw, 25px);
+  font-size: clamp(17px, 2.2vw, 22px);
   font-weight: 700;
   line-height: 1.2;
   overflow-wrap: anywhere;
@@ -215,7 +215,7 @@ body {
 
 .fixture-card-footer {
   justify-content: flex-start;
-  margin-top: 14px;
+  margin-top: 12px;
 }
 
 .show-more-fixtures {
@@ -424,7 +424,7 @@ body {
 /* --- Card odds and actions --- */
 
 .fixture-markets {
-  margin-top: 16px;
+  margin-top: 14px;
 }
 
 .fixture-market + .fixture-market {
@@ -468,6 +468,21 @@ body {
   font-size: clamp(16px, 2.6vw, 23px);
   line-height: 1.15;
   letter-spacing: -0.04em;
+}
+
+.fixture-card .fixture-prices .chip {
+  min-height: 68px;
+  padding-inline: clamp(5px, 1.6vw, 9px);
+}
+
+.fixture-card .fixture-prices .chip-value {
+  max-width: 100%;
+  font-size: clamp(14px, 2.4vw, 20px);
+  overflow-wrap: anywhere;
+}
+
+.fixture-card .fixture-prices .chip-value-long {
+  font-size: clamp(12px, 2.1vw, 16px);
 }
 
 .fixture-prices .chip-up,

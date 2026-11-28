@@ -40,6 +40,8 @@ test('labels prices by feed participant order even when participant one is away'
     })
     const html = formatPrices(prices, names, null, 18146919)
     assert.match(html, /Away &amp; Co.*4\.683.*Draw.*4\.066.*Home FC.*1\.850/)
+    const longPrice = formatPrices([1000250], ['part1'], ['up'], 18146919)
+    assert.match(longPrice, /class="chip-value chip-value-long">▲1000\.250<\/span>/)
   `, dashboard)
 })
 
@@ -55,9 +57,16 @@ test('sorts priced fixtures before fixtures waiting for odds, then by kickoff', 
       resolveNameFromCache(id)
     }
 
+    fixtures.get(4).updateCount = 29
+    const outsideWindow = ensureLine(4, MATCH_ODDS_TYPE)
+    outsideWindow.pricesData = { prices: [2000], priceNames: ['part1'] }
+    fixtures.get(1).updateCount = 1
+    fixtures.get(2).updateCount = 1
+
     const fixtureOrder = () => Array.from(fixtureCards.innerHTML.matchAll(/Team (\d) vs Visitors/g), match => Number(match[1]))
     render()
     assert.deepEqual(fixtureOrder(), [1, 2, 5, 6])
+    assert.equal(totalUpdatesEl.textContent, '2 odds updates on shown cards')
     assert.match(fixtureCards.innerHTML, /Team 1[\s\S]*Waiting for odds[\s\S]*Team 2[\s\S]*Waiting for odds/)
     assert.doesNotMatch(fixtureCards.innerHTML, /Team [34]/)
     assert.equal(fixtureCountEl.textContent, '4 fixtures')
@@ -128,6 +137,7 @@ test('sorts priced fixtures before fixtures waiting for odds, then by kickoff', 
     searchQuery = 'missing team'
     render()
     assert.equal(fixtureCountEl.textContent, '0 fixtures')
+    assert.equal(totalUpdatesEl.textContent, '0 odds updates on shown cards')
   `, dashboard)
 })
 
@@ -297,6 +307,8 @@ test('keeps in-running fixtures visible and shows score updates without odds', (
 
     const main = ensureLine(id, MATCH_ODDS_TYPE)
     main.superOddsType = MATCH_ODDS_TYPE
+    fx.updated = '15:30:00'
+    fx.updateCount = 1
     updateLinePrices(main, [2120], ['part1'])
     updateLinePrices(main, [], null)
     updateLinePrices(main, null, null)
@@ -312,6 +324,8 @@ test('keeps in-running fixtures visible and shows score updates without odds', (
     assert.match(fixtureCards.innerHTML, /aria-expanded="false"[^>]*>Half markets/)
     assert.match(fixtureCards.innerHTML, /id="fixture-events-11">[\s\S]*⚽[\s\S]*GOAL[\s\S]*Header[\s\S]*1 – 2[\s\S]*15:30:00[\s\S]*🏁[\s\S]*Kickoff[\s\S]*15:00:00/)
     assert.match(fixtureCards.innerHTML, /Nottingham Forest[\s\S]*2\.120/)
+    assert.match(fixtureCards.innerHTML, /Updated 15:30:00 · 1 odds update<\/span>/)
+    assert.equal(oddsUpdateLabel(30), '30 odds updates')
     assert.doesNotMatch(fixtureCards.innerHTML, /No prices in this update/)
     fx.expanded = true
     fx.eventsExpanded = false
@@ -353,5 +367,28 @@ test('ignores stale live states and odds for old fixtures and hides premature li
     ensureLine(1, MATCH_ODDS_TYPE).pricesData = { prices: [2000], priceNames: ['part1'] }
     render()
     assert.doesNotMatch(fixtureCards.innerHTML, /Old Team|In running|state-live/)
+  }`, dashboard)
+})
+
+test('archived quotes fill history without replacing newer live prices or state', () => {
+  vm.runInContext(String.raw`{
+    const id = 99
+    const base = {
+      FixtureId: id, SuperOddsType: MATCH_ODDS_TYPE, PriceNames: ['part1'],
+    }
+    const now = Date.now()
+    const line = applyOddsUpdate({ ...base, Ts: now, GameState: 'H2', InRunning: true, Prices: [2000] })
+    applyOddsUpdate({ ...base, Ts: now - 50000, archived: true, GameState: 'H1', Prices: [2300] })
+    applyOddsUpdate({ ...base, Ts: now - 100000, archived: true, Prices: [2200] })
+    assert.equal(line.pricesData.prices[0], 2000)
+    assert.equal(fixtures.get(id).oddsState, 'H2')
+    assert.equal(history.get(line.key).map(entry => entry.prices[0]).join(','), '2000,2300,2200')
+    assert.equal(lastUpdateEl.textContent, 'Updated ' + oddsTime(now))
+
+    const half = { ...base, MarketPeriod: 'half=1' }
+    const halfLine = applyOddsUpdate({ ...half, Ts: now + 1, Prices: [] })
+    applyOddsUpdate({ ...half, Ts: now - 50000, archived: true, Prices: [1800] })
+    assert.equal(halfLine.pricesData.prices[0], 1800)
+    assert.equal(halfLine.oddsTs, now + 1)
   }`, dashboard)
 })

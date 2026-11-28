@@ -22,13 +22,13 @@ COPY txline/ txline/
 RUN pip install --no-cache-dir --no-deps .
 
 RUN useradd --uid 1000 --no-create-home --shell /bin/false appuser \
-    && mkdir -p /app/credentials \
-    && chown appuser:appuser /app/credentials
+    && mkdir -p /app/credentials /app/data \
+    && chown appuser:appuser /app/credentials /app/data
 
 USER appuser
 
 EXPOSE 8000
 
-VOLUME ["/app/credentials"]
+ENV TXLINE_DATABASE=/app/data/txline.sqlite3
 
-ENTRYPOINT ["txline-server", "--credentials", "/app/credentials/.txline-credentials.json"]
+ENTRYPOINT ["txline-server"]

@@ -37,6 +37,7 @@ dev = [
 txline-subscribe = "txline.cli.subscribe:main"
 txline-stream = "txline.cli.stream:main"
 txline-watch = "txline.cli.watch:main"
+txline-ingest = "txline.ingest:cli"
 txline-server = "txline.api.server:cli"
 
 [tool.ruff]

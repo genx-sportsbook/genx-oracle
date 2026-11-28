@@ -1,336 +1,290 @@
 import asyncio
+import json
+from contextlib import aclosing
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
-from httpx import AsyncClient, ASGITransport
-from unittest.mock import patch, AsyncMock
-from txline.api.server import create_app
+from click.testing import CliRunner
+from httpx import ASGITransport, AsyncClient
+
+from txline.api.server import cli as server_cli
+from txline.api.server import create_app, stream_events
 from txline.exceptions import TxLineStreamError
-from txline.models import Fixture, OddsUpdate, ScoreUpdate, Heartbeat, TokenCredentials
+from txline.ingest import Ingester, UpstreamCredentials
+from txline.ingest import cli as ingest_cli
+from txline.models import Fixture, Heartbeat, OddsUpdate, ScoreUpdate, TokenCredentials
+from txline.store import REPLAY_LIMIT, FeedStore
 
-
-@pytest.fixture
-def creds():
-    return TokenCredentials(jwt="test-jwt", api_token="test-token")
-
-
-@pytest.fixture
-def app(creds):
-    return create_app(creds)
-
-
-FIXTURE_1 = Fixture(
+FIXTURE = Fixture(
     Ts=1000, StartTime=1781830800000, Competition="Premier League",
-    CompetitionId=8, FixtureGroupId=1, Participant1Id=1,
-    Participant1="Mexico", Participant2Id=2, Participant2="South Korea",
-    FixtureId=17588223, Participant1IsHome=True, GameState=4,
+    CompetitionId=8, FixtureGroupId=1, Participant1Id=1, Participant1="Forest",
+    Participant2Id=2, Participant2="Chelsea", FixtureId=100, Participant1IsHome=True, GameState=4,
+)
+ODDS = OddsUpdate(
+    FixtureId=100, MessageId="match-odds", Ts=1000, Bookmaker="bet365", BookmakerId=1,
+    SuperOddsType="1X2_PARTICIPANT_RESULT", InRunning=True, Prices=[2000, 3000, 4000],
+)
+SCORE = ScoreUpdate(
+    fixtureId=100, gameState="H2", startTime=1000, participant1Id=1, participant2Id=2,
+    competitionId=8, countryId=1, sportId=1, fixtureGroupId=1, isTeam=True,
+    participant1IsHome=True, action="goal", id=2, ts=1000, connectionId=1, seq=1,
 )
 
 
-async def test_fixtures_returns_list(app):
-    with patch("txline.api.server.get_fixtures_window", new=AsyncMock(return_value=[FIXTURE_1])):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            r = await c.get("/fixtures")
-    assert r.status_code == 200
-    data = r.json()
-    assert len(data) == 1
-    assert data[0]["FixtureId"] == 17588223
-    assert data[0]["Competition"] == "Premier League"
-    assert data[0]["GameState"] == 4
-
-
-async def test_fixtures_passes_credentials(app):
-    captured = {}
-
-    async def mock_get_fixtures(http, jwt, api_token, **kwargs):
-        captured["jwt"] = jwt
-        captured["api_token"] = api_token
-        captured["days_after"] = kwargs["days_after"]
-        captured["competition_id"] = kwargs["competition_id"]
-        return []
-
-    with patch("txline.api.server.get_fixtures_window", new=mock_get_fixtures):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            await c.get("/fixtures")
-
-    assert captured["jwt"] == "test-jwt"
-    assert captured["api_token"] == "test-token"
-    assert captured["days_after"] == 3
-    assert captured["competition_id"] == 8
-
-
-async def test_fixtures_only_return_english_premier_league(app):
-    fixtures = [
-        FIXTURE_1,
-        FIXTURE_1.model_copy(update={"FixtureId": 2, "CompetitionId": 121}),
-        FIXTURE_1.model_copy(update={"FixtureId": 3, "CompetitionId": 113}),
-        FIXTURE_1.model_copy(update={"FixtureId": 4, "CompetitionId": 100, "Competition": "NFL"}),
-        FIXTURE_1.model_copy(update={"FixtureId": 5, "CompetitionId": 101, "Competition": "NCAA"}),
-    ]
-    with patch("txline.api.server.get_fixtures_window", return_value=fixtures):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            response = await c.get("/fixtures")
-
-    assert [fixture["FixtureId"] for fixture in response.json()] == [FIXTURE_1.FixtureId]
-
-
-async def test_odds_stream_sse_format(app):
-    async def mock_odds(jwt, api_token, fixture_id=None, last_event_id=None):
-        match_odds = OddsUpdate(
-            FixtureId=FIXTURE_1.FixtureId, MessageId="match-odds", Ts=1000, Bookmaker="bet365",
-            BookmakerId=1, SuperOddsType="1X2_PARTICIPANT_RESULT", InRunning=False,
-        )
-        yield match_odds
-        yield match_odds.model_copy(update={
-            "MessageId": "other-market", "SuperOddsType": "EUROHANDICAP_PARTICIPANT_POINTS",
-        })
-        yield match_odds.model_copy(update={"MessageId": "other-fixture", "FixtureId": 10})
-        yield Heartbeat(Ts=2000)
-
-    with (
-        patch("txline.api.server.stream_odds", new=mock_odds),
-        patch("txline.api.server.get_fixtures_window", return_value=[FIXTURE_1]),
-    ):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            async with c.stream("GET", "/odds/stream") as r:
-                assert r.status_code == 200
-                assert "text/event-stream" in r.headers["content-type"]
-                content = b""
-                async for chunk in r.aiter_bytes():
-                    content += chunk
-
-    text = content.decode()
-    assert "event: odds" in text
-    assert '"MessageId":"match-odds"' in text
-    assert "other-market" not in text
-    assert "other-fixture" not in text
-    assert "event: heartbeat" in text
-
-
-async def test_odds_stream_fixture_id_passthrough(app):
-    captured = {}
-
-    async def mock_odds(jwt, api_token, fixture_id=None, last_event_id=None):
-        captured["fixture_id"] = fixture_id
-        yield Heartbeat(Ts=1000)
-
-    with patch("txline.api.server.stream_odds", new=mock_odds):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            async with c.stream("GET", "/odds/stream?fixtureId=42") as r:
-                async for _ in r.aiter_bytes():
-                    pass
-
-    assert captured["fixture_id"] == 42
-
-
-async def test_scores_stream_sse_format(app):
-    async def mock_scores(jwt, api_token, fixture_id=None, last_event_id=None):
-        score = ScoreUpdate(
-            fixtureId=FIXTURE_1.FixtureId, gameState="active", startTime=1000,
-            participant1Id=1, participant2Id=2, competitionId=1,
-            countryId=1, sportId=1, fixtureGroupId=1,
-            isTeam=True, participant1IsHome=True,
-            action="goal", id=1, ts=1000,
-            connectionId=1, seq=1,
-        )
-        yield score
-        yield score.model_copy(update={"fixtureId": 99})
-        yield Heartbeat(Ts=3000)
-
-    with (
-        patch("txline.api.server.stream_scores", new=mock_scores),
-        patch("txline.api.server.get_fixtures_window", return_value=[FIXTURE_1]),
-    ):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            async with c.stream("GET", "/scores/stream") as r:
-                assert r.status_code == 200
-                assert "text/event-stream" in r.headers["content-type"]
-                content = b""
-                async for chunk in r.aiter_bytes():
-                    content += chunk
-
-    text = content.decode()
-    assert "event: scores" in text
-    assert f'"fixtureId":{FIXTURE_1.FixtureId}' in text
-    assert '"fixtureId":99' not in text
-    assert "event: heartbeat" in text
-
-
-async def test_scores_stream_fixture_id_passthrough(app):
-    captured = {}
-
-    async def mock_scores(jwt, api_token, fixture_id=None, last_event_id=None):
-        captured["fixture_id"] = fixture_id
-        yield Heartbeat(Ts=1000)
-
-    with patch("txline.api.server.stream_scores", new=mock_scores):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            async with c.stream("GET", "/scores/stream?fixtureId=7") as r:
-                async for _ in r.aiter_bytes():
-                    pass
-
-    assert captured["fixture_id"] == 7
-
-
-async def test_cors_header_present(app):
-    with patch("txline.api.server.get_fixtures_window", new=AsyncMock(return_value=[])):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            r = await c.get("/fixtures", headers={"Origin": "https://example.com"})
-    assert r.headers.get("access-control-allow-origin") == "*"
-
-
-def test_cli_exits_on_missing_credentials(tmp_path):
-    from click.testing import CliRunner
-    from txline.api.server import cli
-
-    runner = CliRunner()
-    result = runner.invoke(cli, ["--credentials", str(tmp_path / "nope.json")])
-    assert result.exit_code != 0
-    assert "No credentials" in result.output
-
-
-async def test_healthz_does_no_upstream_work(app):
-    """The probe target must never touch TxLINE — that's what made the old
-    readiness probe (pointed at /fixtures) time out and flap the pod."""
-    called = False
-
-    async def mock_get_fixtures(*args, **kwargs):
-        nonlocal called
-        called = True
-        return []
-
-    with patch("txline.api.server.get_fixtures_window", new=mock_get_fixtures):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            r = await c.get("/healthz")
-
-    assert r.status_code == 200
-    assert r.json()["status"] == "ok"
-    assert called is False
-
-
-async def test_fixtures_trimmed_to_fields_the_dashboard_uses(app):
-    with patch("txline.api.server.get_fixtures_window", new=AsyncMock(return_value=[FIXTURE_1])):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            r = await c.get("/fixtures")
-
-    assert set(r.json()[0]) == {
-        "FixtureId", "Participant1", "Participant2", "Participant1IsHome", "Competition", "StartTime",
-        "GameState",
-    }
-
-
-async def test_fixtures_fetched_once_and_served_from_cache(app):
-    calls = 0
-
-    async def mock_get_fixtures(*args, **kwargs):
-        nonlocal calls
-        calls += 1
-        return [FIXTURE_1]
-
-    with patch("txline.api.server.get_fixtures_window", new=mock_get_fixtures):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            first = await c.get("/fixtures")
-            second = await c.get("/fixtures")
-
-    assert calls == 1
-    assert first.content == second.content
-
-
-async def test_concurrent_cold_requests_fetch_once(app):
-    """Single-flight: without the lock each concurrent caller would start its
-    own ~68MB fetch and ~600MB-peak parse."""
-    calls = 0
-
-    async def mock_get_fixtures(*args, **kwargs):
-        nonlocal calls
-        calls += 1
-        await asyncio.sleep(0.05)
-        return [FIXTURE_1]
-
-    with patch("txline.api.server.get_fixtures_window", new=mock_get_fixtures):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            results = await asyncio.gather(*[c.get("/fixtures") for _ in range(5)])
-
-    assert calls == 1
-    assert all(r.status_code == 200 for r in results)
-
-
-async def test_fixtures_returns_503_when_upstream_fails_with_empty_cache(app):
-    with patch("txline.api.server.get_fixtures_window",
-               new=AsyncMock(side_effect=httpx.HTTPError("boom"))):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            r = await c.get("/fixtures")
-
-    assert r.status_code == 503
-
-
-async def test_concurrent_feed_401s_share_guest_jwt_refresh(app):
-    credentials_used = []
-
-    async def upstream(jwt, api_token, fixture_id=None):
-        credentials_used.append((jwt, api_token))
-        if jwt == "test-jwt":
-            raise TxLineStreamError("rejected", status_code=401)
-        yield Heartbeat(Ts=2000)
-
-    async def new_jwt(client):
-        await asyncio.sleep(0.01)
-        return "new-jwt"
-
-    with (
-        patch("txline.api.server.stream_odds", upstream),
-        patch("txline.api.server.stream_scores", upstream),
-        patch("txline.api.server.get_guest_jwt", side_effect=new_jwt) as refresh,
-    ):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            responses = await asyncio.gather(c.get("/odds/stream"), c.get("/scores/stream"))
-
-    refresh.assert_awaited_once()
-    assert credentials_used.count(("new-jwt", "test-token")) == 2
-    assert all("event: heartbeat" in response.text for response in responses)
-
-
-async def test_repeated_stream_401_reports_authentication_failure(app):
-    upstream = AsyncMock(side_effect=TxLineStreamError("private details", status_code=401))
-
-    async def odds(*args, **kwargs):
-        yield await upstream(*args, **kwargs)
-
-    with (
-        patch("txline.api.server.stream_odds", odds),
-        patch("txline.api.server.get_guest_jwt", return_value="new-jwt") as refresh,
-    ):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            first = await c.get("/odds/stream")
-            second = await c.get("/odds/stream")
-
-    refresh.assert_awaited_once()
-    assert upstream.await_count == 3
-    for response in (first, second):
-        assert "event: feed_status" in response.text
-        assert "data: authentication failed" in response.text
-        assert "private details" not in response.text
-
-
-async def test_fixture_401_loads_replaced_credentials_file(creds, tmp_path):
+@pytest.fixture
+def store(tmp_path):
+    store = FeedStore(tmp_path / "dashboard.sqlite3")
+    store.initialize()
+    store.replace_fixtures([FIXTURE])
+    return store
+
+
+@pytest.fixture
+def ingester(store):
+    creds = TokenCredentials(jwt="test-jwt", api_token="test-token")
+    ingester = Ingester(store, UpstreamCredentials(creds, None))
+    ingester.fixture_ids = store.fixture_ids()
+    return ingester
+
+
+async def test_web_serves_serialized_snapshot_without_upstream_credentials(tmp_path):
+    database = tmp_path / "dashboard.sqlite3"
+    app = create_app(database)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        assert (await client.get("/healthz")).json() == {"status": "ok", "fixturesCached": False}
+        assert (await client.get("/fixtures")).status_code == 503
+
+        store = FeedStore(database)
+        store.initialize()
+        store.replace_fixtures([
+            FIXTURE, FIXTURE.model_copy(update={"FixtureId": 101, "CompetitionId": 121}),
+        ])
+        response = await client.get("/fixtures", headers={"Origin": "https://example.com"})
+        assert response.json() == [{
+            "FixtureId": 100, "Participant1": "Forest", "Participant2": "Chelsea",
+            "Participant1IsHome": True, "Competition": "Premier League",
+            "StartTime": FIXTURE.StartTime, "GameState": 4,
+        }]
+        assert response.headers["access-control-allow-origin"] == "*"
+        assert response.headers["cache-control"] == "no-store"
+        assert (await client.get("/healthz")).json() == {"status": "ok", "fixturesCached": True}
+
+
+async def test_ingester_filters_and_replays_odds_and_scores(store, ingester):
+    async def odds(jwt, api_token):
+        yield ODDS
+        yield ODDS  # reconnect replay
+        yield ODDS.model_copy(update={"FixtureId": 999})
+        yield ODDS.model_copy(update={"SuperOddsType": "OTHER_MARKET", "MessageId": "other"})
+        yield Heartbeat(Ts=1)
+
+    async def scores(jwt, api_token):
+        yield SCORE
+        yield SCORE.model_copy(update={"connectionId": 2, "seq": 10})
+        yield SCORE.model_copy(update={"competitionId": 121})
+        yield SCORE.model_copy(update={"score": {"Participant1": {"Goals": 1}}})
+
+    await asyncio.gather(
+        ingester.read_upstream("odds", odds), ingester.read_upstream("scores", scores),
+    )
+    reader = FeedStore(store.path)
+    async with aclosing(stream_events(reader, "odds", 100)) as feed:
+        first = await anext(feed)
+        assert first["event"] == "odds"
+        assert json.loads(first["data"])["Prices"] == [2000, 3000, 4000]
+        assert json.loads(first["data"])["receivedAt"] > 0
+        assert await anext(feed) == {"event": "feed_status", "data": "feed unavailable"}
+
+    async with aclosing(stream_events(reader, "scores", 100)) as feed:
+        assert json.loads((await anext(feed))["data"])["fixtureId"] == 100
+        correction = json.loads((await anext(feed))["data"])
+        assert correction["score"]["Participant1"]["Goals"] == 1
+        assert (await anext(feed))["event"] == "feed_status"
+
+    reader.set_feed_status("odds", "live")
+    store.append(ODDS.model_copy(update={"MessageId": "next"}))
+    async with aclosing(stream_events(reader, "odds", 100, first["id"])) as feed:
+        assert json.loads((await anext(feed))["data"])["MessageId"] == "next"
+        assert (await anext(feed))["event"] == "heartbeat"
+    async with aclosing(stream_events(reader, "odds", 999)) as feed:
+        assert (await anext(feed))["event"] == "heartbeat"
+
+
+@pytest.mark.parametrize("feed", ["odds", "scores"])
+async def test_sse_endpoint_uses_fixture_and_cursor(store, feed):
+    async def finite_feed(db, selected_feed, fixture_id, last_event_id):
+        assert db.path == store.path
+        assert (selected_feed, fixture_id, last_event_id) == (feed, 100, "cursor")
+        yield {"event": feed, "id": "stored-id", "data": "{}"}
+
+    app = create_app(store.path)
+    with patch("txline.api.server.stream_events", finite_feed):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get(
+                f"/{feed}/stream?fixtureId=100", headers={"Last-Event-ID": "cursor"},
+            )
+    assert "text/event-stream" in response.headers["content-type"]
+    assert "id: stored-id" in response.text
+    assert f"event: {feed}" in response.text
+
+
+def test_history_pruning_preserves_latest_values_and_removes_expired_fixtures(store):
+    store.append(ODDS.model_copy(update={"MarketPeriod": "fulltime"}))
+    store.append(ODDS.model_copy(update={"MarketPeriod": "half=1", "MessageId": "half"}))
+    for n in range(REPLAY_LIMIT + 3):
+        store.append(ODDS.model_copy(update={"Prices": [], "MessageId": f"empty-{n}"}))
+    store.append(SCORE.model_copy(update={"score": {"Participant1": {"Goals": 1}}}))
+    for n in range(REPLAY_LIMIT + 1):
+        store.append(SCORE.model_copy(update={"id": n + 10, "action": "Status"}))
+    store.replace_fixtures([FIXTURE])
+
+    epoch, rows, _ = store.read_feed("odds", None, None)
+    assert len(rows) == REPLAY_LIMIT + 2  # Latest full-time quote and separate half market.
+    assert json.loads(rows[0][1])["MessageId"] == ODDS.MessageId
+    assert json.loads(rows[1][1])["MessageId"] == "half"
+    assert json.loads(rows[-1][1])["MessageId"] == f"empty-{REPLAY_LIMIT + 2}"
+    assert store.read_feed("odds", None, ("f" * 32, rows[-1][0]))[1] == rows
+    assert store.read_feed("odds", None, (epoch, rows[-1][0]))[1] == []
+
+    _, scores, _ = store.read_feed("scores", None, None)
+    assert len(scores) == REPLAY_LIMIT + 1
+    assert json.loads(scores[0][1])["score"] == {"Participant1": {"Goals": 1}}
+
+    store.replace_fixtures([])
+    assert store.read_feed("odds", None, None)[1] == []
+
+
+async def test_fixture_401_reloads_credentials_and_preserves_resolved_league(ingester, tmp_path):
     path = tmp_path / "credentials.json"
-    app = create_app(creds, path)
+    ingester.auth._path = path
     path.write_text(TokenCredentials(jwt="replacement-jwt", api_token="replacement-token")
                     .model_dump_json())
     rejected = httpx.Response(401, request=httpx.Request("GET", "https://example.test"))
 
     async def upstream(client, jwt, api_token, **kwargs):
+        assert kwargs == {"competition_id": 8, "days_after": 3}
         if jwt == "test-jwt":
             rejected.raise_for_status()
         assert (jwt, api_token) == ("replacement-jwt", "replacement-token")
-        return [FIXTURE_1]
+        return [FIXTURE, FIXTURE.model_copy(update={"FixtureId": 2, "CompetitionId": 121})]
 
     with (
-        patch("txline.api.server.get_fixtures_window", upstream),
-        patch("txline.api.server.get_guest_jwt") as refresh,
+        patch("txline.ingest.get_fixtures_window", upstream),
+        patch("txline.ingest.get_guest_jwt") as refresh,
     ):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            response = await c.get("/fixtures")
+        async with httpx.AsyncClient() as client:
+            await ingester.refresh_fixtures(client)
 
     refresh.assert_not_called()
-    assert response.json()[0]["FixtureId"] == FIXTURE_1.FixtureId
+    assert ingester.fixture_ids == {100}
+
+
+async def test_concurrent_feed_401s_share_refresh_and_report_failure(ingester):
+    credentials_used = []
+
+    async def upstream(jwt, api_token):
+        credentials_used.append((jwt, api_token))
+        raise TxLineStreamError("private details", status_code=401)
+        yield
+
+    with patch("txline.ingest.get_guest_jwt", AsyncMock(return_value="new-jwt")) as refresh:
+        await asyncio.gather(
+            ingester.read_upstream("odds", upstream), ingester.read_upstream("scores", upstream),
+        )
+
+    refresh.assert_awaited_once()
+    assert credentials_used.count(("new-jwt", "test-token")) == 2
+    for feed in ("odds", "scores"):
+        async with aclosing(stream_events(ingester.store, feed, None)) as events:
+            assert await anext(events) == {"event": "feed_status", "data": "authentication failed"}
+
+
+def test_only_ingester_cli_requires_credentials(tmp_path):
+    runner = CliRunner()
+    result = runner.invoke(ingest_cli, ["--credentials", str(tmp_path / "missing.json")])
+    assert result.exit_code != 0
+    assert "No credentials" in result.output
+    with patch("txline.api.server.uvicorn.run") as run:
+        result = runner.invoke(server_cli, ["--database", str(tmp_path / "dashboard.sqlite3")])
+    assert result.exit_code == 0
+    run.assert_called_once()
+
+
+async def test_single_ingester_supplies_multiple_dashboard_connections(tmp_path):
+    store = FeedStore(tmp_path / "shared.sqlite3")
+    creds = TokenCredentials(jwt="test-jwt", api_token="test-token")
+    collector = Ingester(store, UpstreamCredentials(creds, None))
+    connections = []
+    odds_written = asyncio.Event()
+    scores_written = asyncio.Event()
+
+    async def odds(jwt, api_token):
+        connections.append(("odds", jwt, api_token))
+        yield ODDS
+        odds_written.set()
+        await asyncio.Future()
+
+    async def scores(jwt, api_token):
+        connections.append(("scores", jwt, api_token))
+        yield SCORE
+        scores_written.set()
+        await asyncio.Future()
+
+    with (
+        patch("txline.ingest.get_fixtures_window", AsyncMock(return_value=[FIXTURE])),
+        patch("txline.ingest.get_odds_history", AsyncMock(return_value=[])),
+        patch("txline.ingest.stream_odds", odds),
+        patch("txline.ingest.stream_scores", scores),
+    ):
+        task = asyncio.create_task(collector.run())
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(odds_written.wait(), scores_written.wait()), timeout=5,
+            )
+            async with (
+                aclosing(stream_events(FeedStore(store.path), "odds", None)) as browser_one,
+                aclosing(stream_events(FeedStore(store.path), "odds", None)) as browser_two,
+            ):
+                first, second = await asyncio.gather(anext(browser_one), anext(browser_two))
+                assert first == second
+                assert json.loads(first["data"])["Prices"] == ODDS.Prices
+            assert sorted(connections) == [
+                ("odds", "test-jwt", "test-token"), ("scores", "test-jwt", "test-token"),
+            ]
+        finally:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+
+async def test_backfill_merges_with_live_odds_and_keeps_recent_market_history(store, ingester):
+    newest = ODDS.model_copy(update={"Ts": 5000, "MessageId": "live"})
+    store.append(newest)
+    archive = [
+        newest,
+        *[ODDS.model_copy(update={"Ts": n, "MessageId": f"old-{n}"})
+          for n in range(REPLAY_LIMIT + 2)],
+        ODDS.model_copy(update={"Ts": 1000, "MessageId": "half", "MarketPeriod": "half=1"}),
+        ODDS.model_copy(update={"FixtureId": 101, "MessageId": "wrong-fixture"}),
+        ODDS.model_copy(update={"SuperOddsType": "OTHER_MARKET", "MessageId": "wrong-market"}),
+    ]
+
+    def upstream(request):
+        assert request.url.path == "/api/odds/updates/100"
+        assert request.headers["authorization"] == "Bearer test-jwt"
+        assert request.headers["x-api-token"] == "test-token"
+        return httpx.Response(200, json=[event.model_dump() for event in archive])
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(upstream)) as client:
+        assert await ingester.backfill_odds(client, 100) == REPLAY_LIMIT
+        assert await ingester.backfill_odds(client, 100) == 0
+
+    _, rows, _ = store.read_feed("odds", 100, None)
+    updates = [json.loads(payload) for _, payload in rows]
+    assert len(updates) == REPLAY_LIMIT + 1
+    assert updates[0]["MessageId"] == "live"
+    assert "archived" not in updates[0]
+    assert all(update["archived"] for update in updates[1:])
+    assert updates[1]["MessageId"] == "old-3"
+    assert updates[-1]["MessageId"] == "half"
