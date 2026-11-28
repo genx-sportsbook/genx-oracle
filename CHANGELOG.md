@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented here.
 
+## [1.2.0] - 2026-11-28
+
+### Added
+
+- Run a dedicated TxLINE ingester that stores fixtures, odds, and scores in
+  SQLite. Replay recent updates when the dashboard opens or reconnects.
+- Backfill recent Match Odds from TxLINE's archive so fixtures have a quote
+  and price history before the next live update arrives.
+- Run the ingester and dashboard together with `scripts/run-local.sh`. The
+  Helm chart gives both containers a shared SQLite PVC. Configure
+  `persistence.storageClass` on clusters without a default storage class.
+
+### Changed
+
+- Count odds updates for the fixture cards shown on the board.
+- Make fixture typography more compact, with smaller text for long odds.
+
 ## [1.1.7] - 2026-11-27
 
 ### Added
