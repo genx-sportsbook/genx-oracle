@@ -1,3 +1,0 @@
-# Victora has no default StorageClass. Use node-local storage for SQLite WAL.
-persistence:
-  storageClass: local-path
